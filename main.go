@@ -14,7 +14,7 @@ import (
 // @version     1.0
 // @description 基于GoFrame的知识库检索系统API服务
 // @schemes     http https
-// @contact.url https://github.com/your-username/knowledge-system
+// @contact.url https://github.com/DouDOU-start/knowledge-system
 func main() {
 	// 执行所有初始化
 	helper.InitAll()
