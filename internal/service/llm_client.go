@@ -61,7 +61,7 @@ func GetLLMClient() LLMClient {
 				}{
 					BaseURL:    "http://localhost:11434",
 					Model:      "llama3",
-					PromptPath: "resource/prompts/classify.txt",
+					PromptPath: "resource/prompts/classify",
 				},
 			}
 		}
@@ -79,7 +79,7 @@ func GetLLMClient() LLMClient {
 			llmClientInstance = &LangchainOllamaLLMAdapter{
 				BaseURL:    "http://localhost:11434",
 				Model:      "llama3",
-				PromptPath: "resource/prompts/classify.txt",
+				PromptPath: "resource/prompts/classify",
 			}
 		}
 	})
