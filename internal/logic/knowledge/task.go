@@ -9,10 +9,11 @@ import (
 	"knowledge-system-api/internal/model"
 	"knowledge-system-api/internal/model/do"
 	"knowledge-system-api/internal/model/entity"
-	"knowledge-system-api/internal/service/interfaces"
+	"knowledge-system-api/internal/service"
 	"sync"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -46,10 +47,16 @@ func (s *Knowledge) InitTaskProcessor() {
 		return
 	}
 
+	// 初始化持久化队列
+	InitPersistentQueue()
+
 	// 启动指定数量的工作协程来处理任务
 	for i := 0; i < concurrentWorkers; i++ {
 		go s.taskWorker()
 	}
+
+	// 启动任务恢复协程
+	go s.recoverTasks()
 
 	g.Log().Debug(gctx.New(), "任务处理器已初始化，工作协程数量:", concurrentWorkers)
 	taskProcessorInitialized = true
@@ -58,9 +65,23 @@ func (s *Knowledge) InitTaskProcessor() {
 // 工作协程，从任务队列中获取任务并处理
 func (s *Knowledge) taskWorker() {
 	ctx := gctx.New()
-	for taskID := range taskChan {
-		g.Log().Debug(ctx, "开始处理任务:", taskID)
-		s.processTask(ctx, taskID)
+	for {
+		// 从持久化队列获取任务
+		taskID := DequeueTask()
+		if taskID != "" {
+			g.Log().Debug(ctx, "开始处理任务:", taskID)
+			success := true
+
+			// 处理任务
+			err := s.processTask(ctx, taskID)
+			if err != nil {
+				g.Log().Error(ctx, "处理任务失败:", err)
+				success = false
+			}
+
+			// 标记任务完成
+			CompleteTask(ctx, taskID, success)
+		}
 	}
 }
 
@@ -73,12 +94,6 @@ func (s *Knowledge) CreateImportTask(ctx context.Context, items []model.TaskItem
 	taskID := uuid.NewString()
 	now := gtime.Now()
 
-	// 序列化任务项
-	itemsJSON, err := json.Marshal(items)
-	if err != nil {
-		return "", err
-	}
-
 	// 创建任务记录
 	task := do.ImportTask{
 		Id:        taskID,
@@ -88,31 +103,64 @@ func (s *Knowledge) CreateImportTask(ctx context.Context, items []model.TaskItem
 		Processed: 0,
 		Failed:    0,
 		Message:   "任务已创建，等待处理",
-		Items:     string(itemsJSON),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
-	// 保存到数据库
-	_, err = dao.ImportTask.Ctx(ctx).Data(task).Insert()
+	// 开启事务
+	err := dao.ImportTask.Transaction(ctx, func(ctx g.Ctx, tx gdb.TX) error {
+		// 1. 保存主任务记录
+		_, err := dao.ImportTask.Ctx(ctx).Data(task).Insert()
+		if err != nil {
+			return err
+		}
+
+		// 2. 保存任务条目记录
+		for _, item := range items {
+			// 将每个任务条目序列化为 JSON
+			sourceData, err := json.Marshal(map[string]interface{}{
+				"repo_name": item.RepoName,
+				"content":   item.Content,
+			})
+			if err != nil {
+				return err
+			}
+
+			// 创建任务条目
+			_, err = dao.ImportTaskItem.Ctx(ctx).Data(do.ImportTaskItem{
+				TaskId:       taskID,
+				Status:       "pending",
+				SourceData:   string(sourceData),
+				ErrorMessage: "",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			}).Insert()
+
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("创建导入任务失败: %w", err)
 	}
 
-	// 将任务ID放入任务队列
-	select {
-	case taskChan <- taskID:
-		g.Log().Debug(ctx, "任务已加入队列:", taskID)
-	default:
-		// 队列已满，更新任务状态为失败
+	// 将任务加入持久化队列
+	err = EnqueueTask(ctx, taskID, 0) // 默认优先级为0
+	if err != nil {
+		// 更新任务状态为失败
 		dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
 			Status:    "failed",
-			Message:   "任务队列已满，无法处理",
+			Message:   "加入任务队列失败: " + err.Error(),
 			UpdatedAt: gtime.Now(),
 		}).Where(do.ImportTask{Id: taskID}).Update()
-		return taskID, fmt.Errorf("任务队列已满，请稍后再试")
+		return taskID, fmt.Errorf("加入任务队列失败: %w", err)
 	}
 
+	g.Log().Debug(ctx, "任务已加入队列:", taskID)
 	return taskID, nil
 }
 
@@ -128,11 +176,38 @@ func (s *Knowledge) GetTaskStatus(ctx context.Context, taskID string) (*model.Im
 		return nil, fmt.Errorf("任务不存在")
 	}
 
-	var items []model.TaskItem
-	if entity.Items != "" {
-		if err := json.Unmarshal([]byte(entity.Items), &items); err != nil {
-			g.Log().Warning(ctx, "解析任务项JSON失败", err)
-			items = []model.TaskItem{}
+	// 从 import_task_item 表中获取任务条目
+	var taskItems []model.TaskItem
+	var items []struct {
+		Id           int64  `json:"id"`
+		TaskId       string `json:"task_id"`
+		Status       string `json:"status"`
+		SourceData   string `json:"source_data"`
+		ErrorMessage string `json:"error_message"`
+	}
+
+	err = dao.ImportTaskItem.Ctx(ctx).Where("task_id=?", taskID).
+		OrderAsc("id").
+		Scan(&items)
+
+	if err != nil {
+		g.Log().Warning(ctx, "获取任务条目失败", err)
+	} else {
+		for _, item := range items {
+			var sourceData map[string]interface{}
+			if err := json.Unmarshal([]byte(item.SourceData), &sourceData); err != nil {
+				g.Log().Warning(ctx, "解析任务条目数据失败", err)
+				continue
+			}
+
+			taskItems = append(taskItems, model.TaskItem{
+				ID:           item.Id,
+				TaskID:       item.TaskId,
+				RepoName:     sourceData["repo_name"].(string),
+				Content:      sourceData["content"].(string),
+				Status:       item.Status,
+				ErrorMessage: item.ErrorMessage,
+			})
 		}
 	}
 
@@ -144,7 +219,7 @@ func (s *Knowledge) GetTaskStatus(ctx context.Context, taskID string) (*model.Im
 		Processed: entity.Processed,
 		Failed:    entity.Failed,
 		Message:   entity.Message,
-		Items:     items,
+		Items:     taskItems,
 		CreatedAt: entity.CreatedAt,
 		UpdatedAt: entity.UpdatedAt,
 	}, nil
@@ -164,7 +239,7 @@ func (s *Knowledge) UpdateTaskStatus(ctx context.Context, taskID string, status 
 }
 
 // processTask 处理导入任务
-func (s *Knowledge) processTask(ctx context.Context, taskID string) {
+func (s *Knowledge) processTask(ctx context.Context, taskID string) error {
 	// 标记任务为处理中
 	s.UpdateTaskStatus(ctx, taskID, "processing", 0, 0, 0, "任务处理中")
 
@@ -173,48 +248,114 @@ func (s *Knowledge) processTask(ctx context.Context, taskID string) {
 	if err != nil {
 		g.Log().Error(ctx, "获取任务详情失败:", err)
 		s.UpdateTaskStatus(ctx, taskID, "failed", 0, 0, 0, "获取任务详情失败: "+err.Error())
-		return
+		return err
 	}
 
-	// 处理每个任务项
-	processed := 0
-	failed := 0
-	items := task.Items
+	// 使用通用结构查询待处理的任务条目
+	var items []struct {
+		Id           int64  `json:"id"`
+		TaskId       string `json:"task_id"`
+		Status       string `json:"status"`
+		SourceData   string `json:"source_data"`
+		ErrorMessage string `json:"error_message"`
+	}
+
+	err = dao.ImportTaskItem.Ctx(ctx).Where("task_id=? AND status=?", taskID, "pending").
+		OrderAsc("id").
+		Scan(&items)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("获取任务条目失败: %s", err.Error())
+		g.Log().Error(ctx, errMsg)
+		s.UpdateTaskStatus(ctx, taskID, "failed", 0, task.Processed, task.Failed, errMsg)
+		return err
+	}
+
 	totalItems := len(items)
-
 	if totalItems == 0 {
-		s.UpdateTaskStatus(ctx, taskID, "completed", 100, 0, 0, "任务中没有可处理的条目")
-		return
+		// 检查是否所有条目都已处理完成
+		if task.Processed+task.Failed == task.Total {
+			finalStatus := "completed"
+			finalMessage := fmt.Sprintf("任务完成: 共 %d 条, 成功 %d 条, 失败 %d 条", task.Total, task.Processed, task.Failed)
+
+			if task.Failed == task.Total {
+				finalStatus = "failed"
+				finalMessage = "所有条目处理失败"
+			} else if task.Failed > 0 {
+				finalStatus = "completed_with_errors"
+				finalMessage = fmt.Sprintf("任务部分完成: 共 %d 条, 成功 %d 条, 失败 %d 条", task.Total, task.Processed, task.Failed)
+			}
+
+			s.UpdateTaskStatus(ctx, taskID, finalStatus, 100, task.Processed, task.Failed, finalMessage)
+		} else {
+			s.UpdateTaskStatus(ctx, taskID, "processing",
+				int(float64(task.Processed+task.Failed)/float64(task.Total)*100),
+				task.Processed, task.Failed, "待处理队列为空，但仍有条目未完成")
+		}
+		return nil
 	}
+
+	// 更新任务进度
+	processed := task.Processed
+	failed := task.Failed
+
+	// 日志记录恢复信息
+	g.Log().Info(ctx, fmt.Sprintf("开始处理任务 %s：已处理 %d 项，失败 %d 项，待处理 %d 项",
+		taskID, processed, failed, totalItems))
 
 	// 更新任务项状态
 	for i, item := range items {
-		// 更新任务状态
-		progress := int(float64(i) / float64(totalItems) * 100)
-		s.UpdateTaskStatus(ctx, taskID, "processing", progress, processed, failed,
-			fmt.Sprintf("正在处理第 %d/%d 条", i+1, totalItems))
+		// 解析任务条目数据
+		var itemData map[string]interface{}
+		if err := json.Unmarshal([]byte(item.SourceData), &itemData); err != nil {
+			g.Log().Warning(ctx, "解析任务条目数据失败", err)
+			continue
+		}
 
-		g.Log().Debug(ctx, fmt.Sprintf("处理任务 %s 的第 %d/%d 条: %s", taskID, i+1, totalItems, item.ID))
+		// 准备任务项数据
+		content := itemData["content"].(string)
+		repoName := itemData["repo_name"].(string)
+
+		// 更新任务状态
+		progress := int(float64(processed+failed+i) / float64(task.Total) * 100)
+		s.UpdateTaskStatus(ctx, taskID, "processing", progress, processed, failed,
+			fmt.Sprintf("正在处理第 %d/%d 条", processed+failed+i+1, task.Total))
+
+		g.Log().Debug(ctx, fmt.Sprintf("处理任务 %s 的第 %d/%d 条: %d",
+			taskID, processed+failed+i+1, task.Total, item.Id))
+
+		// 更新任务条目状态为处理中
+		dao.ImportTaskItem.Ctx(ctx).Data(do.ImportTaskItem{
+			Status:    "processing",
+			UpdatedAt: gtime.Now(),
+		}).Where(do.ImportTaskItem{Id: item.Id}).Update()
 
 		// 处理单个条目
-		err := s.processTaskItem(ctx, item)
+		err := s.processTaskItemContent(ctx, content, repoName)
 		if err != nil {
 			g.Log().Error(ctx, "处理任务项失败:", err, "item:", item)
-			items[i].Status = "failed"
-			items[i].Message = err.Error()
+			// 更新任务条目状态为失败
+			dao.ImportTaskItem.Ctx(ctx).Data(do.ImportTaskItem{
+				Status:       "failed",
+				ErrorMessage: err.Error(),
+				UpdatedAt:    gtime.Now(),
+			}).Where(do.ImportTaskItem{Id: item.Id}).Update()
 			failed++
 		} else {
-			items[i].Status = "completed"
+			// 更新任务条目状态为完成
+			dao.ImportTaskItem.Ctx(ctx).Data(do.ImportTaskItem{
+				Status:    "completed",
+				UpdatedAt: gtime.Now(),
+			}).Where(do.ImportTaskItem{Id: item.Id}).Update()
 			processed++
 		}
 
-		// 每10个条目或最后一个条目时更新任务项状态
-		if (i+1)%10 == 0 || i == totalItems-1 {
-			itemsJSON, _ := json.Marshal(items)
-			dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
-				Items: string(itemsJSON),
-			}).Where(do.ImportTask{Id: taskID}).Update()
-		}
+		// 每处理一项就立即更新主任务状态，确保重启后可以恢复
+		dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
+			Processed: processed,
+			Failed:    failed,
+			UpdatedAt: gtime.Now(),
+		}).Where(do.ImportTask{Id: taskID}).Update()
 
 		// 添加短暂延迟，避免处理过快导致资源占用过高
 		time.Sleep(100 * time.Millisecond)
@@ -222,71 +363,110 @@ func (s *Knowledge) processTask(ctx context.Context, taskID string) {
 
 	// 更新最终状态
 	finalStatus := "completed"
-	finalMessage := fmt.Sprintf("任务完成: 共 %d 条, 成功 %d 条, 失败 %d 条", totalItems, processed, failed)
-	if failed == totalItems {
+	finalMessage := fmt.Sprintf("任务完成: 共 %d 条, 成功 %d 条, 失败 %d 条", task.Total, processed, failed)
+	if failed == task.Total {
 		finalStatus = "failed"
 		finalMessage = "所有条目处理失败"
 	} else if failed > 0 {
 		finalStatus = "completed_with_errors"
-		finalMessage = fmt.Sprintf("任务部分完成: 共 %d 条, 成功 %d 条, 失败 %d 条", totalItems, processed, failed)
+		finalMessage = fmt.Sprintf("任务部分完成: 共 %d 条, 成功 %d 条, 失败 %d 条", task.Total, processed, failed)
 	}
 
 	s.UpdateTaskStatus(ctx, taskID, finalStatus, 100, processed, failed, finalMessage)
 	g.Log().Debug(ctx, "任务处理完成:", taskID, finalMessage)
+	return nil
 }
 
-// processTaskItem 处理单个任务项
-func (s *Knowledge) processTaskItem(ctx context.Context, item model.TaskItem) error {
+// processTaskItemContent 处理单个任务条目内容
+func (s *Knowledge) processTaskItemContent(ctx context.Context, content string, repoName string) error {
 	// 检查服务是否已初始化
 	if helper.LLMClassify == nil {
 		return fmt.Errorf("LLM分类服务未初始化")
 	}
+
 	if helper.Vectorize == nil {
 		return fmt.Errorf("向量化服务未初始化")
 	}
-	if helper.QdrantUpsert == nil {
-		return fmt.Errorf("Qdrant服务未初始化")
-	}
-	if helper.GetKnowledgeService == nil {
-		return fmt.Errorf("知识库服务未初始化")
-	}
 
-	// 调用LLM进行标签分类和摘要生成
-	labels, summary, err := helper.LLMClassify(ctx, item.Content)
+	// 1. 生成唯一ID
+	id := uuid.NewString()
+
+	// 2. 调用LLM进行分类，获取标签和摘要
+	labels, summary, err := helper.LLMClassify(ctx, content)
 	if err != nil {
-		return fmt.Errorf("LLM推理失败: %v", err)
+		return fmt.Errorf("LLM分类失败: %w", err)
 	}
 
-	// 过滤标签
-	filtered := helper.FilterLabels(labels, 3)
+	// 3. 过滤低分标签
+	labels = helper.FilterLabels(labels, 70)
 
-	// 向量化
-	vector, err := helper.Vectorize(ctx, item.Content)
+	// 4. 向量化文本
+	vector, err := helper.Vectorize(ctx, content)
 	if err != nil {
-		return fmt.Errorf("向量化失败: %v", err)
+		return fmt.Errorf("向量化失败: %w", err)
 	}
 
-	// 生成ID
-	id := item.ID
-	if id == "" {
-		id = uuid.NewString()
+	// 5. 存入向量数据库
+	if err := helper.QdrantUpsert(id, vector, content, repoName, labels, summary); err != nil {
+		return fmt.Errorf("保存到向量库失败: %w", err)
 	}
 
-	// 存入向量数据库
-	if err := helper.QdrantUpsert(id, vector, item.Content, filtered, summary); err != nil {
-		return fmt.Errorf("Qdrant入库失败: %v", err)
-	}
-
-	// 获取知识库服务接口
-	knowledgeService, ok := helper.GetKnowledgeService().(interfaces.KnowledgeService)
-	if !ok {
-		return fmt.Errorf("知识库服务类型转换失败")
-	}
-
-	// 存入MySQL
-	if err := knowledgeService.CreateKnowledge(ctx, id, item.Content, filtered, summary); err != nil {
-		return fmt.Errorf("MySQL入库失败: %v", err)
+	// 6. 存入MySQL
+	knowledgeService := service.KnowledgeService()
+	if err := knowledgeService.CreateKnowledge(ctx, id, repoName, content, labels, summary); err != nil {
+		return fmt.Errorf("保存到MySQL失败: %w", err)
 	}
 
 	return nil
+}
+
+// recoverTasks 恢复未完成的任务
+func (s *Knowledge) recoverTasks() {
+	ctx := context.Background()
+	g.Log().Debug(ctx, "开始恢复未完成的任务...")
+
+	// 查找所有未完成的任务
+	var entities []entity.ImportTask
+	err := dao.ImportTask.Ctx(ctx).
+		Where("status IN(?)", g.Slice{"pending", "processing"}).
+		OrderAsc("created_at").
+		Scan(&entities)
+
+	if err != nil {
+		g.Log().Error(ctx, "查询未完成任务失败:", err)
+		return
+	}
+
+	if len(entities) == 0 {
+		g.Log().Debug(ctx, "没有需要恢复的任务")
+		return
+	}
+
+	g.Log().Infof(ctx, "找到 %d 个未完成的任务", len(entities))
+
+	// 恢复任务
+	for _, e := range entities {
+		// 更新任务状态
+		g.Log().Infof(ctx, "恢复任务: %s, 原状态: %s", e.Id, e.Status)
+
+		// 标记为正在处理
+		dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
+			Status:    "processing",
+			Message:   "任务恢复处理中",
+			UpdatedAt: gtime.Now(),
+		}).Where(do.ImportTask{Id: e.Id}).Update()
+
+		// 将任务加入队列
+		err := EnqueueTask(ctx, e.Id, 0)
+		if err != nil {
+			g.Log().Error(ctx, "将任务加入队列失败:", err)
+			dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
+				Status:    "failed",
+				Message:   "恢复任务失败: " + err.Error(),
+				UpdatedAt: gtime.Now(),
+			}).Where(do.ImportTask{Id: e.Id}).Update()
+		}
+	}
+
+	g.Log().Info(ctx, "任务恢复完成")
 }

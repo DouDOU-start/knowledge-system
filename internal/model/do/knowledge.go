@@ -12,6 +12,7 @@ import (
 type Knowledge struct {
 	g.Meta    `orm:"table:knowledge, do:true"`
 	Id        interface{} // 唯一ID，服务端生成uuid
+	RepoName  interface{} // 知识库名称
 	Content   interface{} // 知识内容
 	Labels    interface{} // 标签分数数组，存储为JSON字符串
 	Summary   interface{} // 内容摘要

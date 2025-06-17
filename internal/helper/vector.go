@@ -9,7 +9,7 @@ import (
 type VectorizeFunc func(ctx context.Context, text string) ([]float32, error)
 
 // VectorSearchFunc 向量搜索函数类型
-type VectorSearchFunc func(query string, vector []float32, limit int) ([]model.VectorSearchResult, error)
+type VectorSearchFunc func(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error)
 
 // 全局函数变量
 var (

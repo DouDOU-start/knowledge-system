@@ -25,7 +25,6 @@ type importTaskColumns struct {
 	Processed string // 已处理条目数
 	Failed    string // 失败条目数
 	Message   string // 任务相关信息
-	Items     string // 任务项JSON数据
 	CreatedAt string // 创建时间
 	UpdatedAt string // 更新时间
 }
@@ -43,7 +42,6 @@ var (
 			Processed: "processed",
 			Failed:    "failed",
 			Message:   "message",
-			Items:     "items",
 			CreatedAt: "created_at",
 			UpdatedAt: "updated_at",
 		},

@@ -23,7 +23,7 @@ func New() *Knowledge {
 }
 
 // CreateKnowledge 创建知识条目
-func (s *Knowledge) CreateKnowledge(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error {
+func (s *Knowledge) CreateKnowledge(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error {
 	labelsJson, err := json.Marshal(labels)
 	if err != nil {
 		return err
@@ -32,6 +32,7 @@ func (s *Knowledge) CreateKnowledge(ctx context.Context, id, content string, lab
 	now := gtime.Now()
 	_, err = dao.Knowledge.Ctx(ctx).Data(do.Knowledge{
 		Id:        id,
+		RepoName:  repoName,
 		Content:   content,
 		Labels:    string(labelsJson),
 		Summary:   summary,
@@ -64,6 +65,7 @@ func (s *Knowledge) GetKnowledgeById(ctx context.Context, id string) (*model.Kno
 
 	return &model.KnowledgeItem{
 		ID:        entity.Id,
+		RepoName:  entity.RepoName,
 		Content:   entity.Content,
 		Labels:    labels,
 		Summary:   entity.Summary,
@@ -73,14 +75,21 @@ func (s *Knowledge) GetKnowledgeById(ctx context.Context, id string) (*model.Kno
 }
 
 // SearchKnowledgeByKeyword 关键词搜索知识条目
-func (s *Knowledge) SearchKnowledgeByKeyword(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
+func (s *Knowledge) SearchKnowledgeByKeyword(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error) {
 	var entities []entity.Knowledge
 
-	// 使用 LIKE 进行关键词搜索
-	err := dao.Knowledge.Ctx(ctx).
+	// 构建查询
+	query := dao.Knowledge.Ctx(ctx).
 		WhereLike("content", "%"+keyword+"%").
-		WhereOr("summary LIKE ?", "%"+keyword+"%").
-		Limit(limit).
+		WhereOr("summary LIKE ?", "%"+keyword+"%")
+
+	// 如果指定了知识库名称，则添加条件
+	if repoName != "" {
+		query = query.Where("repo_name", repoName)
+	}
+
+	// 执行查询
+	err := query.Limit(limit).
 		OrderDesc("created_at").
 		Scan(&entities)
 
@@ -97,11 +106,12 @@ func (s *Knowledge) SearchKnowledgeByKeyword(ctx context.Context, keyword string
 		}
 
 		results = append(results, model.SearchResult{
-			ID:      e.Id,
-			Content: e.Content,
-			Labels:  labels,
-			Summary: e.Summary,
-			Score:   1.0, // 关键词搜索默认分数为1
+			ID:       e.Id,
+			RepoName: e.RepoName,
+			Content:  e.Content,
+			Labels:   labels,
+			Summary:  e.Summary,
+			Score:    1.0, // 关键词搜索默认分数为1
 		})
 	}
 
@@ -109,7 +119,7 @@ func (s *Knowledge) SearchKnowledgeByKeyword(ctx context.Context, keyword string
 }
 
 // SearchKnowledgeBySemantic 语义搜索知识条目
-func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
+func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
 	// 调用向量搜索服务
 	if helper.Vectorize == nil {
 		return nil, gerror.New("向量化服务未初始化")
@@ -125,7 +135,8 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 		return nil, gerror.New("向量搜索服务未初始化")
 	}
 
-	qdrantResults, err := helper.VectorSearch(query, vector, limit)
+	// 这里传入 repoName 参数
+	qdrantResults, err := helper.VectorSearch(query, vector, repoName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -143,12 +154,18 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 			continue
 		}
 
+		// 如果指定了知识库名称，但结果不匹配，则跳过
+		if repoName != "" && knowledgeItem.RepoName != repoName {
+			continue
+		}
+
 		results = append(results, model.SearchResult{
-			ID:      knowledgeItem.ID,
-			Content: knowledgeItem.Content,
-			Labels:  knowledgeItem.Labels,
-			Summary: knowledgeItem.Summary,
-			Score:   item.Score,
+			ID:       knowledgeItem.ID,
+			RepoName: knowledgeItem.RepoName,
+			Content:  knowledgeItem.Content,
+			Labels:   knowledgeItem.Labels,
+			Summary:  knowledgeItem.Summary,
+			Score:    item.Score,
 		})
 	}
 
@@ -156,15 +173,15 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 }
 
 // SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
-func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
+func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
 	// 先进行语义搜索
-	semanticResults, err := s.SearchKnowledgeBySemantic(ctx, query, limit)
+	semanticResults, err := s.SearchKnowledgeBySemantic(ctx, query, repoName, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	// 再进行关键词搜索
-	keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, limit)
+	keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -200,4 +217,21 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, l
 	}
 
 	return results, nil
+}
+
+// GetAllRepos 获取所有知识库名称
+func (s *Knowledge) GetAllRepos(ctx context.Context) ([]string, error) {
+	var repos []string
+
+	// 查询所有不同的知识库名称
+	err := dao.Knowledge.Ctx(ctx).
+		Fields("DISTINCT repo_name").
+		OrderAsc("repo_name").
+		Scan(&repos)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return repos, nil
 }

@@ -8,19 +8,19 @@ import (
 // KnowledgeService 知识库业务接口
 type KnowledgeService interface {
 	// CreateKnowledge 创建知识条目
-	CreateKnowledge(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error
+	CreateKnowledge(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error
 
 	// GetKnowledgeById 根据ID获取知识条目
 	GetKnowledgeById(ctx context.Context, id string) (*model.KnowledgeItem, error)
 
 	// SearchKnowledgeByKeyword 关键词搜索知识条目
-	SearchKnowledgeByKeyword(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeByKeyword(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// SearchKnowledgeBySemantic 语义搜索知识条目
-	SearchKnowledgeBySemantic(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
-	SearchKnowledgeByHybrid(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// CreateImportTask 创建导入任务
 	CreateImportTask(ctx context.Context, items []model.TaskItem) (string, error)
@@ -30,6 +30,9 @@ type KnowledgeService interface {
 
 	// UpdateTaskStatus 更新任务状态
 	UpdateTaskStatus(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
+
+	// GetAllRepos 获取所有知识库名称
+	GetAllRepos(ctx context.Context) ([]string, error)
 }
 
 // EmbeddingService 向量嵌入服务接口
@@ -47,8 +50,8 @@ type LLMService interface {
 // VectorDBService 向量数据库服务接口
 type VectorDBService interface {
 	// Upsert 插入或更新向量
-	Upsert(id string, vector []float32, content string, labels []model.LabelScore, summary string) error
+	Upsert(id string, vector []float32, content string, repoName string, labels []model.LabelScore, summary string) error
 
 	// Search 向量搜索
-	Search(query string, vector []float32, limit int) ([]model.VectorSearchResult, error)
+	Search(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error)
 }

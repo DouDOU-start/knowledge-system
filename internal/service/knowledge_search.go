@@ -19,7 +19,7 @@ import (
 // ===================== 检索主流程 =====================
 
 // SearchKnowledge 检索主入口，支持 keyword/semantic/hybrid 三种模式
-func SearchKnowledge(ctx context.Context, query, mode string, topK int) ([]model.KnowledgeItem, error) {
+func SearchKnowledge(ctx context.Context, query, repoName, mode string, topK int) ([]model.KnowledgeItem, error) {
 	if topK <= 0 {
 		topK = 5
 	}
@@ -34,20 +34,20 @@ func SearchKnowledge(ctx context.Context, query, mode string, topK int) ([]model
 
 	switch mode {
 	case "keyword":
-		return keywordSearch(ctx, query, topK)
+		return keywordSearch(ctx, query, repoName, topK)
 	case "semantic":
-		return semanticSearch(ctx, vector, topK)
+		return semanticSearch(ctx, vector, repoName, topK)
 	case "hybrid":
-		return hybridSearch(ctx, vector, labels, topK)
+		return hybridSearch(ctx, vector, repoName, labels, topK)
 	default:
-		return hybridSearch(ctx, vector, labels, topK)
+		return hybridSearch(ctx, vector, repoName, labels, topK)
 	}
 }
 
 // ===================== Qdrant相关 =====================
 
 // qdrantSearch 向量检索，返回id和分数列表
-func qdrantSearch(ctx context.Context, vector []float32, topK int) ([]struct {
+func qdrantSearch(ctx context.Context, vector []float32, repoName string, topK int) ([]struct {
 	ID    string
 	Score float32
 }, error) {
@@ -55,13 +55,30 @@ func qdrantSearch(ctx context.Context, vector []float32, topK int) ([]struct {
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
-	body := map[string]interface{}{
+
+	// 构建请求体
+	reqBody := map[string]interface{}{
 		"vector":       vector,
 		"top":          topK,
 		"with_payload": false,
 		"with_vector":  false,
 	}
-	jsonBody, _ := json.Marshal(body)
+
+	// 如果指定了知识库名称，添加过滤条件
+	if repoName != "" {
+		reqBody["filter"] = map[string]interface{}{
+			"must": []map[string]interface{}{
+				{
+					"key": "repo_name",
+					"match": map[string]interface{}{
+						"value": repoName,
+					},
+				},
+			},
+		}
+	}
+
+	jsonBody, _ := json.Marshal(reqBody)
 	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.Qdrant.BaseURL, cfg.Qdrant.Collection)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
@@ -107,10 +124,11 @@ func getKnowledgeByIDs(ctx context.Context, ids []string) ([]model.KnowledgeItem
 		return nil, nil
 	}
 	var items []struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
-		Labels  string `json:"labels"`
-		Summary string `json:"summary"`
+		ID       string `json:"id"`
+		RepoName string `json:"repo_name"`
+		Content  string `json:"content"`
+		Labels   string `json:"labels"`
+		Summary  string `json:"summary"`
 	}
 	err := g.Model("knowledge").
 		Where("id IN(?)", ids).
@@ -125,10 +143,11 @@ func getKnowledgeByIDs(ctx context.Context, ids []string) ([]model.KnowledgeItem
 			return nil, fmt.Errorf("解析标签JSON失败: %w", err)
 		}
 		result = append(result, model.KnowledgeItem{
-			ID:      item.ID,
-			Content: item.Content,
-			Labels:  labels,
-			Summary: item.Summary,
+			ID:       item.ID,
+			RepoName: item.RepoName,
+			Content:  item.Content,
+			Labels:   labels,
+			Summary:  item.Summary,
 		})
 	}
 	// 按照传入的ids顺序排序
@@ -145,8 +164,8 @@ func getKnowledgeByIDs(ctx context.Context, ids []string) ([]model.KnowledgeItem
 // ===================== 检索模式实现 =====================
 
 // semanticSearch 只用Qdrant分数
-func semanticSearch(ctx context.Context, vector []float32, topK int) ([]model.KnowledgeItem, error) {
-	points, err := qdrantSearch(ctx, vector, topK)
+func semanticSearch(ctx context.Context, vector []float32, repoName string, topK int) ([]model.KnowledgeItem, error) {
+	points, err := qdrantSearch(ctx, vector, repoName, topK)
 	if err != nil {
 		return nil, err
 	}
@@ -174,12 +193,12 @@ func semanticSearch(ctx context.Context, vector []float32, topK int) ([]model.Kn
 }
 
 // hybridSearch 语义分数+标签分数融合
-func hybridSearch(ctx context.Context, vector []float32, queryLabels []model.LabelScore, topK int) ([]model.KnowledgeItem, error) {
+func hybridSearch(ctx context.Context, vector []float32, repoName string, queryLabels []model.LabelScore, topK int) ([]model.KnowledgeItem, error) {
 	cfg, err := loadSearchConfig()
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
-	points, err := qdrantSearch(ctx, vector, topK*2)
+	points, err := qdrantSearch(ctx, vector, repoName, topK*2)
 	if err != nil {
 		return nil, fmt.Errorf("向量检索失败: %w", err)
 	}
@@ -211,23 +230,35 @@ func hybridSearch(ctx context.Context, vector []float32, queryLabels []model.Lab
 }
 
 // keywordSearch 关键词检索（MySQL全文索引）
-func keywordSearch(ctx context.Context, query string, topK int) ([]model.KnowledgeItem, error) {
+func keywordSearch(ctx context.Context, query string, repoName string, topK int) ([]model.KnowledgeItem, error) {
 	var items []struct {
-		ID      string  `json:"id"`
-		Content string  `json:"content"`
-		Labels  string  `json:"labels"`
-		Summary string  `json:"summary"`
-		Score   float64 `json:"score"`
+		ID       string  `json:"id"`
+		RepoName string  `json:"repo_name"`
+		Content  string  `json:"content"`
+		Labels   string  `json:"labels"`
+		Summary  string  `json:"summary"`
+		Score    float64 `json:"score"`
 	}
-	err := g.Model("knowledge").
+
+	// 构建查询
+	m := g.Model("knowledge").
 		Fields("*, MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE) as score", query).
-		Where("MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE)", query).
-		Order("score DESC").
+		Where("MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE)", query)
+
+	// 如果指定了知识库名称，添加条件
+	if repoName != "" {
+		m = m.Where("repo_name = ?", repoName)
+	}
+
+	// 执行查询
+	err := m.Order("score DESC").
 		Limit(topK).
 		Scan(&items)
+
 	if err != nil {
 		return nil, fmt.Errorf("MySQL全文检索失败: %w", err)
 	}
+
 	result := make([]model.KnowledgeItem, 0, len(items))
 	for _, item := range items {
 		var labels []model.LabelScore
@@ -235,11 +266,12 @@ func keywordSearch(ctx context.Context, query string, topK int) ([]model.Knowled
 			return nil, fmt.Errorf("解析标签JSON失败: %w", err)
 		}
 		result = append(result, model.KnowledgeItem{
-			ID:      item.ID,
-			Content: item.Content,
-			Labels:  labels,
-			Summary: item.Summary,
-			Vector:  []float32{float32(item.Score)},
+			ID:       item.ID,
+			RepoName: item.RepoName,
+			Content:  item.Content,
+			Labels:   labels,
+			Summary:  item.Summary,
+			Vector:   []float32{float32(item.Score)},
 		})
 	}
 	return result, nil

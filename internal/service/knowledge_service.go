@@ -12,7 +12,10 @@ func init() {
 	helper.SetVectorize(Vectorize)
 
 	// 初始化向量搜索函数
-	helper.SetVectorSearch(InternalQdrantSearch)
+	helper.SetVectorSearch(func(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
+		ctx := context.Background()
+		return QdrantSearch(ctx, query, vector, repoName, limit)
+	})
 
 	// 初始化 LLM 分类函数
 	helper.SetLLMClassify(LLMClassifyByConfig)
@@ -51,10 +54,10 @@ func Vectorize(ctx context.Context, content string) ([]float32, error) {
 }
 
 // InternalQdrantSearch 调用 Qdrant 搜索
-func InternalQdrantSearch(query string, vector []float32, limit int) ([]model.VectorSearchResult, error) {
+func InternalQdrantSearch(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
 	// 调用 qdrant_client.go 中的实现
 	ctx := context.Background()
-	return QdrantSearch(ctx, query, vector, limit)
+	return QdrantSearch(ctx, query, vector, repoName, limit)
 }
 
 // 知识库服务接口实现
@@ -71,19 +74,19 @@ func KnowledgeService() interfaces.KnowledgeService {
 // 以下方法将通过 logic 层注入实现
 var (
 	// CreateKnowledgeLogic 创建知识条目逻辑
-	CreateKnowledgeLogic func(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error
+	CreateKnowledgeLogic func(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error
 
 	// GetKnowledgeByIdLogic 根据ID获取知识条目逻辑
 	GetKnowledgeByIdLogic func(ctx context.Context, id string) (*model.KnowledgeItem, error)
 
 	// SearchKnowledgeByKeywordLogic 关键词搜索知识条目逻辑
-	SearchKnowledgeByKeywordLogic func(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeByKeywordLogic func(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// SearchKnowledgeBySemanticLogic 语义搜索知识条目逻辑
-	SearchKnowledgeBySemanticLogic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeBySemanticLogic func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// SearchKnowledgeByHybridLogic 混合搜索知识条目逻辑
-	SearchKnowledgeByHybridLogic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeByHybridLogic func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
 
 	// CreateImportTaskLogic 创建导入任务逻辑
 	CreateImportTaskLogic func(ctx context.Context, items []model.TaskItem) (string, error)
@@ -93,18 +96,22 @@ var (
 
 	// UpdateTaskStatusLogic 更新任务状态逻辑
 	UpdateTaskStatusLogic func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
+
+	// GetAllReposLogic 获取所有知识库名称逻辑
+	GetAllReposLogic func(ctx context.Context) ([]string, error)
 )
 
 // RegisterKnowledgeLogic 注册知识库业务逻辑实现
 func RegisterKnowledgeLogic(
-	createKnowledge func(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error,
+	createKnowledge func(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error,
 	getKnowledgeById func(ctx context.Context, id string) (*model.KnowledgeItem, error),
-	searchByKeyword func(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error),
-	searchBySemantic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error),
-	searchByHybrid func(ctx context.Context, query string, limit int) ([]model.SearchResult, error),
+	searchByKeyword func(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error),
+	searchBySemantic func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
+	searchByHybrid func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
 	createImportTask func(ctx context.Context, items []model.TaskItem) (string, error),
 	getTaskStatus func(ctx context.Context, taskId string) (*model.ImportTask, error),
 	updateTaskStatus func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error,
+	getAllRepos func(ctx context.Context) ([]string, error),
 ) {
 	CreateKnowledgeLogic = createKnowledge
 	GetKnowledgeByIdLogic = getKnowledgeById
@@ -114,14 +121,15 @@ func RegisterKnowledgeLogic(
 	CreateImportTaskLogic = createImportTask
 	GetTaskStatusLogic = getTaskStatus
 	UpdateTaskStatusLogic = updateTaskStatus
+	GetAllReposLogic = getAllRepos
 }
 
 // CreateKnowledge 创建知识条目
-func (s *knowledgeServiceImpl) CreateKnowledge(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error {
+func (s *knowledgeServiceImpl) CreateKnowledge(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error {
 	if CreateKnowledgeLogic == nil {
 		return context.Canceled
 	}
-	return CreateKnowledgeLogic(ctx, id, content, labels, summary)
+	return CreateKnowledgeLogic(ctx, id, repoName, content, labels, summary)
 }
 
 // GetKnowledgeById 根据ID获取知识条目
@@ -133,27 +141,27 @@ func (s *knowledgeServiceImpl) GetKnowledgeById(ctx context.Context, id string) 
 }
 
 // SearchKnowledgeByKeyword 关键词搜索知识条目
-func (s *knowledgeServiceImpl) SearchKnowledgeByKeyword(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
+func (s *knowledgeServiceImpl) SearchKnowledgeByKeyword(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error) {
 	if SearchKnowledgeByKeywordLogic == nil {
 		return nil, context.Canceled
 	}
-	return SearchKnowledgeByKeywordLogic(ctx, keyword, limit)
+	return SearchKnowledgeByKeywordLogic(ctx, keyword, repoName, limit)
 }
 
 // SearchKnowledgeBySemantic 语义搜索知识条目
-func (s *knowledgeServiceImpl) SearchKnowledgeBySemantic(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
+func (s *knowledgeServiceImpl) SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
 	if SearchKnowledgeBySemanticLogic == nil {
 		return nil, context.Canceled
 	}
-	return SearchKnowledgeBySemanticLogic(ctx, query, limit)
+	return SearchKnowledgeBySemanticLogic(ctx, query, repoName, limit)
 }
 
 // SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
-func (s *knowledgeServiceImpl) SearchKnowledgeByHybrid(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
+func (s *knowledgeServiceImpl) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
 	if SearchKnowledgeByHybridLogic == nil {
 		return nil, context.Canceled
 	}
-	return SearchKnowledgeByHybridLogic(ctx, query, limit)
+	return SearchKnowledgeByHybridLogic(ctx, query, repoName, limit)
 }
 
 // CreateImportTask 创建导入任务
@@ -178,4 +186,12 @@ func (s *knowledgeServiceImpl) UpdateTaskStatus(ctx context.Context, taskId stri
 		return context.Canceled
 	}
 	return UpdateTaskStatusLogic(ctx, taskId, status, progress, processed, failed, message)
+}
+
+// GetAllRepos 获取所有知识库名称
+func (s *knowledgeServiceImpl) GetAllRepos(ctx context.Context) ([]string, error) {
+	if GetAllReposLogic == nil {
+		return nil, context.Canceled
+	}
+	return GetAllReposLogic(ctx)
 }

@@ -20,6 +20,7 @@ func InitServiceLogic() {
 		k.CreateImportTask,
 		k.GetTaskStatus,
 		k.UpdateTaskStatus,
+		k.GetAllRepos,
 	)
 }
 

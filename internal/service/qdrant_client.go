@@ -72,7 +72,7 @@ type QdrantUpsertResponse struct {
 }
 
 // QdrantUpsert 将知识条目写入Qdrant向量库
-func QdrantUpsert(id string, vector []float32, content string, labels []model.LabelScore, summary string) error {
+func QdrantUpsert(id string, vector []float32, content string, repoName string, labels []model.LabelScore, summary string) error {
 	cfg := GetQdrantConfig()
 
 	// 1. 检查向量
@@ -91,9 +91,10 @@ func QdrantUpsert(id string, vector []float32, content string, labels []model.La
 		ID:     id,
 		Vector: vector,
 		Payload: map[string]interface{}{
-			"content": content,
-			"labels":  labelArr,
-			"summary": summary,
+			"content":   content,
+			"repo_name": repoName,
+			"labels":    labelArr,
+			"summary":   summary,
 		},
 	}
 	upsertReq := QdrantUpsertRequest{
@@ -134,19 +135,35 @@ RETRY_UPSERT:
 }
 
 // QdrantSearch 向量搜索
-func QdrantSearch(ctx context.Context, query string, vector []float32, limit int) ([]model.VectorSearchResult, error) {
+func QdrantSearch(ctx context.Context, query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
 	cfg := GetQdrantConfig()
 
 	if len(vector) == 0 {
 		return nil, fmt.Errorf("QdrantSearch: 向量为空")
 	}
 
-	body := map[string]interface{}{
+	// 构建查询
+	searchRequest := map[string]interface{}{
 		"vector":       vector,
 		"top":          limit,
 		"with_payload": true,
 	}
-	jsonBody, _ := json.Marshal(body)
+
+	// 如果指定了知识库名称，添加过滤条件
+	if repoName != "" {
+		searchRequest["filter"] = map[string]interface{}{
+			"must": []map[string]interface{}{
+				{
+					"key": "repo_name",
+					"match": map[string]interface{}{
+						"value": repoName,
+					},
+				},
+			},
+		}
+	}
+
+	jsonBody, _ := json.Marshal(searchRequest)
 	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.URL, cfg.Collection)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonBody))
 	if err != nil {

@@ -12,7 +12,7 @@ type LLMClassifyFunc func(ctx context.Context, content string) ([]model.LabelSco
 type FilterLabelsFunc func(labels []model.LabelScore, threshold int) []model.LabelScore
 
 // QdrantUpsertFunc Qdrant 向量库插入函数类型
-type QdrantUpsertFunc func(id string, vector []float32, content string, labels []model.LabelScore, summary string) error
+type QdrantUpsertFunc func(id string, vector []float32, content string, repoName string, labels []model.LabelScore, summary string) error
 
 // KnowledgeServiceFunc 获取知识库服务接口实例函数类型
 type KnowledgeServiceFunc func() interface{}

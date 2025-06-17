@@ -42,20 +42,17 @@ func (c *ControllerV1) BatchImport(ctx context.Context, req *v1.BatchImportReq) 
 			return nil, gerror.NewCodef(gcode.CodeInternalError, "向量化失败: %s", err.Error())
 		}
 
-		// 生成ID
-		id := item.ID
-		if id == "" {
-			id = uuid.NewString()
-		}
+		// 始终生成新的 ID，不使用用户提供的 ID
+		id := uuid.NewString()
 
 		// 存入向量数据库
-		if err := service.QdrantUpsert(id, vector, item.Content, filtered, summary); err != nil {
+		if err := service.QdrantUpsert(id, vector, item.Content, req.RepoName, filtered, summary); err != nil {
 			g.Log().Errorf(ctx, "Qdrant入库失败: %v", err)
 			return nil, gerror.NewCodef(gcode.CodeInternalError, "Qdrant入库失败: %s", err.Error())
 		}
 
 		// 存入MySQL
-		if err := service.KnowledgeService().CreateKnowledge(ctx, id, item.Content, filtered, summary); err != nil {
+		if err := service.KnowledgeService().CreateKnowledge(ctx, id, req.RepoName, item.Content, filtered, summary); err != nil {
 			g.Log().Errorf(ctx, "MySQL入库失败: %v", err)
 			return nil, gerror.NewCodef(gcode.CodeInternalError, "MySQL入库失败: %s", err.Error())
 		}
@@ -72,9 +69,10 @@ func (c *ControllerV1) BatchImportAsync(ctx context.Context, req *v1.BatchImport
 	var taskItems []model.TaskItem
 	for _, item := range req.Items {
 		taskItems = append(taskItems, model.TaskItem{
-			ID:      item.ID,
-			Content: item.Content,
-			Status:  "pending",
+			// 不使用用户提供的 ID，任务项 ID 由系统在处理时生成
+			RepoName: req.RepoName,
+			Content:  item.Content,
+			Status:   "pending",
 		})
 	}
 
@@ -156,11 +154,11 @@ func (c *ControllerV1) Search(ctx context.Context, req *v1.SearchReq) (res *v1.S
 	var items []model.SearchResult
 	switch req.Mode {
 	case "keyword":
-		items, err = service.KnowledgeService().SearchKnowledgeByKeyword(ctx, req.Query, req.TopK)
+		items, err = service.KnowledgeService().SearchKnowledgeByKeyword(ctx, req.Query, req.RepoName, req.TopK)
 	case "semantic":
-		items, err = service.KnowledgeService().SearchKnowledgeBySemantic(ctx, req.Query, req.TopK)
+		items, err = service.KnowledgeService().SearchKnowledgeBySemantic(ctx, req.Query, req.RepoName, req.TopK)
 	case "hybrid", "":
-		items, err = service.KnowledgeService().SearchKnowledgeByHybrid(ctx, req.Query, req.TopK)
+		items, err = service.KnowledgeService().SearchKnowledgeByHybrid(ctx, req.Query, req.RepoName, req.TopK)
 	default:
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "不支持的搜索模式")
 	}
@@ -182,12 +180,25 @@ func (c *ControllerV1) Search(ctx context.Context, req *v1.SearchReq) (res *v1.S
 		}
 
 		outItems = append(outItems, v1.KnowledgeResult{
-			ID:      item.ID,
-			Content: item.Content,
-			Labels:  outLabels,
-			Summary: item.Summary,
+			ID:       item.ID,
+			RepoName: item.RepoName,
+			Content:  item.Content,
+			Labels:   outLabels,
+			Summary:  item.Summary,
 		})
 	}
 
 	return &v1.SearchRes{Items: outItems}, nil
+}
+
+// GetRepos 获取所有知识库
+func (c *ControllerV1) GetRepos(ctx context.Context, req *v1.GetReposReq) (res *v1.GetReposRes, err error) {
+	// 获取所有知识库名称
+	repos, err := service.KnowledgeService().GetAllRepos(ctx)
+	if err != nil {
+		g.Log().Errorf(ctx, "获取知识库列表失败: %v", err)
+		return nil, gerror.NewCodef(gcode.CodeInternalError, "获取知识库列表失败: %s", err.Error())
+	}
+
+	return &v1.GetReposRes{Repos: repos}, nil
 }
