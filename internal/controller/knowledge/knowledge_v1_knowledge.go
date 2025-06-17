@@ -64,6 +64,59 @@ func (c *ControllerV1) BatchImport(ctx context.Context, req *v1.BatchImportReq) 
 	return &v1.BatchImportRes{Success: true}, nil
 }
 
+// BatchImportAsync 批量异步导入知识条目
+func (c *ControllerV1) BatchImportAsync(ctx context.Context, req *v1.BatchImportAsyncReq) (res *v1.BatchImportAsyncRes, err error) {
+	// 参数校验由框架自动完成，这里只需处理业务逻辑
+
+	// 创建任务项
+	var taskItems []model.TaskItem
+	for _, item := range req.Items {
+		taskItems = append(taskItems, model.TaskItem{
+			ID:      item.ID,
+			Content: item.Content,
+			Status:  "pending",
+		})
+	}
+
+	// 创建导入任务
+	taskID, err := service.KnowledgeService().CreateImportTask(ctx, taskItems)
+	if err != nil {
+		g.Log().Errorf(ctx, "创建导入任务失败: %v", err)
+		return nil, gerror.NewCodef(gcode.CodeInternalError, "创建导入任务失败: %s", err.Error())
+	}
+
+	return &v1.BatchImportAsyncRes{
+		TaskID:  taskID,
+		Message: "任务已创建，正在后台处理",
+	}, nil
+}
+
+// TaskStatus 查询任务状态
+func (c *ControllerV1) TaskStatus(ctx context.Context, req *v1.TaskStatusReq) (res *v1.TaskStatusRes, err error) {
+	// 参数校验由框架自动完成，这里只需处理业务逻辑
+
+	// 获取任务状态
+	task, err := service.KnowledgeService().GetTaskStatus(ctx, req.TaskID)
+	if err != nil {
+		g.Log().Errorf(ctx, "获取任务状态失败: %v", err)
+		return nil, gerror.NewCodef(gcode.CodeInternalError, "获取任务状态失败: %s", err.Error())
+	}
+
+	if task == nil {
+		return nil, gerror.NewCode(gcode.CodeNotFound, "任务不存在")
+	}
+
+	return &v1.TaskStatusRes{
+		TaskID:    task.TaskID,
+		Status:    task.Status,
+		Progress:  task.Progress,
+		Total:     task.Total,
+		Processed: task.Processed,
+		Failed:    task.Failed,
+		Message:   task.Message,
+	}, nil
+}
+
 // Classify 单条内容标签打分
 func (c *ControllerV1) Classify(ctx context.Context, req *v1.ClassifyReq) (res *v1.ClassifyRes, err error) {
 	// 参数校验由框架自动完成

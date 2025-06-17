@@ -19,6 +19,28 @@ type KnowledgeItem struct {
 	UpdatedAt *gtime.Time  `json:"updated_at"`
 }
 
+// ImportTask 导入任务
+type ImportTask struct {
+	TaskID    string      `json:"task_id"`
+	Status    string      `json:"status"`   // pending, processing, completed, failed
+	Progress  int         `json:"progress"` // 0-100
+	Total     int         `json:"total"`
+	Processed int         `json:"processed"`
+	Failed    int         `json:"failed"`
+	Message   string      `json:"message,omitempty"`
+	Items     []TaskItem  `json:"items,omitempty"`
+	CreatedAt *gtime.Time `json:"created_at"`
+	UpdatedAt *gtime.Time `json:"updated_at"`
+}
+
+// TaskItem 任务项
+type TaskItem struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+	Status  string `json:"status"` // pending, processing, completed, failed
+	Message string `json:"message,omitempty"`
+}
+
 // SearchResult 搜索结果
 type SearchResult struct {
 	ID      string       `json:"id"`

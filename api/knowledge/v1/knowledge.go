@@ -34,6 +34,35 @@ type BatchImportRes struct {
 	Message string `json:"message,omitempty"`
 }
 
+// 批量异步导入
+//
+type BatchImportAsyncReq struct {
+	g.Meta `path:"/batch_import_async" method:"post" tags:"Knowledge" summary:"批量异步导入知识条目"`
+	Items  []KnowledgeItem `json:"items" v:"required|array#导入条目不能为空|导入条目必须为数组"`
+}
+
+type BatchImportAsyncRes struct {
+	TaskID  string `json:"task_id"` // 任务ID，用于查询进度
+	Message string `json:"message"` // 提示信息
+}
+
+// 任务状态
+//
+type TaskStatusReq struct {
+	g.Meta `path:"/task/:task_id" method:"get" tags:"Knowledge" summary:"查询任务状态"`
+	TaskID string `json:"task_id" in:"path" v:"required#任务ID不能为空"`
+}
+
+type TaskStatusRes struct {
+	TaskID    string `json:"task_id"`           // 任务ID
+	Status    string `json:"status"`            // 任务状态：pending, processing, completed, failed
+	Progress  int    `json:"progress"`          // 处理进度，0-100
+	Total     int    `json:"total"`             // 总条目数
+	Processed int    `json:"processed"`         // 已处理条目数
+	Failed    int    `json:"failed"`            // 失败条目数
+	Message   string `json:"message,omitempty"` // 任务相关信息
+}
+
 // 单条内容标签打分
 //
 type ClassifyReq struct {

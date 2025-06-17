@@ -21,6 +21,15 @@ type KnowledgeService interface {
 
 	// SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
 	SearchKnowledgeByHybrid(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+
+	// CreateImportTask 创建导入任务
+	CreateImportTask(ctx context.Context, items []model.TaskItem) (string, error)
+
+	// GetTaskStatus 获取任务状态
+	GetTaskStatus(ctx context.Context, taskId string) (*model.ImportTask, error)
+
+	// UpdateTaskStatus 更新任务状态
+	UpdateTaskStatus(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
 }
 
 // EmbeddingService 向量嵌入服务接口

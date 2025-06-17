@@ -5,6 +5,7 @@ import (
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"knowledge-system-api/internal/cmd"
+	"knowledge-system-api/internal/helper"
 	_ "knowledge-system-api/internal/logic"
 	_ "knowledge-system-api/internal/packed"
 )
@@ -15,5 +16,9 @@ import (
 // @schemes     http https
 // @contact.url https://github.com/your-username/knowledge-system
 func main() {
+	// 执行所有初始化
+	helper.InitAll()
+
+	// 运行主命令
 	cmd.Main.Run(gctx.GetInitCtx())
 }

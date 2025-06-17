@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"knowledge-system-api/internal/helper"
-	"knowledge-system-api/internal/logic/knowledge"
 	"knowledge-system-api/internal/model"
 	"knowledge-system-api/internal/service/interfaces"
 )
@@ -14,6 +13,20 @@ func init() {
 
 	// 初始化向量搜索函数
 	helper.SetVectorSearch(InternalQdrantSearch)
+
+	// 初始化 LLM 分类函数
+	helper.SetLLMClassify(LLMClassifyByConfig)
+
+	// 初始化标签过滤函数
+	helper.SetFilterLabels(FilterLabels)
+
+	// 初始化 Qdrant 向量库插入函数
+	helper.SetQdrantUpsert(QdrantUpsert)
+
+	// 初始化知识库服务获取函数
+	helper.SetKnowledgeService(func() interface{} {
+		return KnowledgeService()
+	})
 }
 
 // LLMClassifyByConfig 调用配置指定的大模型推理后端
@@ -44,7 +57,7 @@ func InternalQdrantSearch(query string, vector []float32, limit int) ([]model.Ve
 	return QdrantSearch(ctx, query, vector, limit)
 }
 
-// 知识库服务实现
+// 知识库服务接口实现
 type knowledgeServiceImpl struct{}
 
 // 初始化时创建实例
@@ -55,27 +68,114 @@ func KnowledgeService() interfaces.KnowledgeService {
 	return knowledgeService
 }
 
+// 以下方法将通过 logic 层注入实现
+var (
+	// CreateKnowledgeLogic 创建知识条目逻辑
+	CreateKnowledgeLogic func(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error
+
+	// GetKnowledgeByIdLogic 根据ID获取知识条目逻辑
+	GetKnowledgeByIdLogic func(ctx context.Context, id string) (*model.KnowledgeItem, error)
+
+	// SearchKnowledgeByKeywordLogic 关键词搜索知识条目逻辑
+	SearchKnowledgeByKeywordLogic func(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error)
+
+	// SearchKnowledgeBySemanticLogic 语义搜索知识条目逻辑
+	SearchKnowledgeBySemanticLogic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+
+	// SearchKnowledgeByHybridLogic 混合搜索知识条目逻辑
+	SearchKnowledgeByHybridLogic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error)
+
+	// CreateImportTaskLogic 创建导入任务逻辑
+	CreateImportTaskLogic func(ctx context.Context, items []model.TaskItem) (string, error)
+
+	// GetTaskStatusLogic 获取任务状态逻辑
+	GetTaskStatusLogic func(ctx context.Context, taskId string) (*model.ImportTask, error)
+
+	// UpdateTaskStatusLogic 更新任务状态逻辑
+	UpdateTaskStatusLogic func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
+)
+
+// RegisterKnowledgeLogic 注册知识库业务逻辑实现
+func RegisterKnowledgeLogic(
+	createKnowledge func(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error,
+	getKnowledgeById func(ctx context.Context, id string) (*model.KnowledgeItem, error),
+	searchByKeyword func(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error),
+	searchBySemantic func(ctx context.Context, query string, limit int) ([]model.SearchResult, error),
+	searchByHybrid func(ctx context.Context, query string, limit int) ([]model.SearchResult, error),
+	createImportTask func(ctx context.Context, items []model.TaskItem) (string, error),
+	getTaskStatus func(ctx context.Context, taskId string) (*model.ImportTask, error),
+	updateTaskStatus func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error,
+) {
+	CreateKnowledgeLogic = createKnowledge
+	GetKnowledgeByIdLogic = getKnowledgeById
+	SearchKnowledgeByKeywordLogic = searchByKeyword
+	SearchKnowledgeBySemanticLogic = searchBySemantic
+	SearchKnowledgeByHybridLogic = searchByHybrid
+	CreateImportTaskLogic = createImportTask
+	GetTaskStatusLogic = getTaskStatus
+	UpdateTaskStatusLogic = updateTaskStatus
+}
+
 // CreateKnowledge 创建知识条目
 func (s *knowledgeServiceImpl) CreateKnowledge(ctx context.Context, id, content string, labels []model.LabelScore, summary string) error {
-	return knowledge.New().CreateKnowledge(ctx, id, content, labels, summary)
+	if CreateKnowledgeLogic == nil {
+		return context.Canceled
+	}
+	return CreateKnowledgeLogic(ctx, id, content, labels, summary)
 }
 
 // GetKnowledgeById 根据ID获取知识条目
 func (s *knowledgeServiceImpl) GetKnowledgeById(ctx context.Context, id string) (*model.KnowledgeItem, error) {
-	return knowledge.New().GetKnowledgeById(ctx, id)
+	if GetKnowledgeByIdLogic == nil {
+		return nil, context.Canceled
+	}
+	return GetKnowledgeByIdLogic(ctx, id)
 }
 
 // SearchKnowledgeByKeyword 关键词搜索知识条目
 func (s *knowledgeServiceImpl) SearchKnowledgeByKeyword(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
-	return knowledge.New().SearchKnowledgeByKeyword(ctx, keyword, limit)
+	if SearchKnowledgeByKeywordLogic == nil {
+		return nil, context.Canceled
+	}
+	return SearchKnowledgeByKeywordLogic(ctx, keyword, limit)
 }
 
 // SearchKnowledgeBySemantic 语义搜索知识条目
 func (s *knowledgeServiceImpl) SearchKnowledgeBySemantic(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
-	return knowledge.New().SearchKnowledgeBySemantic(ctx, query, limit)
+	if SearchKnowledgeBySemanticLogic == nil {
+		return nil, context.Canceled
+	}
+	return SearchKnowledgeBySemanticLogic(ctx, query, limit)
 }
 
 // SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
 func (s *knowledgeServiceImpl) SearchKnowledgeByHybrid(ctx context.Context, query string, limit int) ([]model.SearchResult, error) {
-	return knowledge.New().SearchKnowledgeByHybrid(ctx, query, limit)
+	if SearchKnowledgeByHybridLogic == nil {
+		return nil, context.Canceled
+	}
+	return SearchKnowledgeByHybridLogic(ctx, query, limit)
+}
+
+// CreateImportTask 创建导入任务
+func (s *knowledgeServiceImpl) CreateImportTask(ctx context.Context, items []model.TaskItem) (string, error) {
+	if CreateImportTaskLogic == nil {
+		return "", context.Canceled
+	}
+	return CreateImportTaskLogic(ctx, items)
+}
+
+// GetTaskStatus 获取任务状态
+func (s *knowledgeServiceImpl) GetTaskStatus(ctx context.Context, taskId string) (*model.ImportTask, error) {
+	if GetTaskStatusLogic == nil {
+		return nil, context.Canceled
+	}
+	return GetTaskStatusLogic(ctx, taskId)
+}
+
+// UpdateTaskStatus 更新任务状态
+func (s *knowledgeServiceImpl) UpdateTaskStatus(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error {
+	if UpdateTaskStatusLogic == nil {
+		return context.Canceled
+	}
+	return UpdateTaskStatusLogic(ctx, taskId, status, progress, processed, failed, message)
 }
