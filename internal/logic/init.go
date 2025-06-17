@@ -21,6 +21,7 @@ func InitServiceLogic() {
 		k.GetTaskStatus,
 		k.UpdateTaskStatus,
 		k.GetAllRepos,
+		k.RecoverTasks,
 	)
 }
 

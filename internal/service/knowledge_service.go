@@ -5,6 +5,8 @@ import (
 	"knowledge-system-api/internal/helper"
 	"knowledge-system-api/internal/model"
 	"knowledge-system-api/internal/service/interfaces"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 func init() {
@@ -99,6 +101,9 @@ var (
 
 	// GetAllReposLogic 获取所有知识库名称逻辑
 	GetAllReposLogic func(ctx context.Context) ([]string, error)
+
+	// RecoverTasksLogic 恢复未完成任务逻辑
+	RecoverTasksLogic func()
 )
 
 // RegisterKnowledgeLogic 注册知识库业务逻辑实现
@@ -112,6 +117,7 @@ func RegisterKnowledgeLogic(
 	getTaskStatus func(ctx context.Context, taskId string) (*model.ImportTask, error),
 	updateTaskStatus func(ctx context.Context, taskId string, status string, progress uint, processed uint, failed uint, message string) error,
 	getAllRepos func(ctx context.Context) ([]string, error),
+	recoverTasks func(),
 ) {
 	CreateKnowledgeLogic = createKnowledge
 	GetKnowledgeByIdLogic = getKnowledgeById
@@ -122,6 +128,7 @@ func RegisterKnowledgeLogic(
 	GetTaskStatusLogic = getTaskStatus
 	UpdateTaskStatusLogic = updateTaskStatus
 	GetAllReposLogic = getAllRepos
+	RecoverTasksLogic = recoverTasks
 }
 
 // CreateKnowledge 创建知识条目
@@ -194,4 +201,19 @@ func (s *knowledgeServiceImpl) GetAllRepos(ctx context.Context) ([]string, error
 		return nil, context.Canceled
 	}
 	return GetAllReposLogic(ctx)
+}
+
+// RecoverUnfinishedTasks 恢复未完成的任务
+// 在服务启动时调用
+func RecoverUnfinishedTasks(ctx context.Context) {
+	// 直接调用 logic 层的知识库实例的恢复任务方法
+	g.Log().Info(ctx, "开始恢复未完成任务...")
+
+	// 注意：这里我们不能直接引用 knowledge.Knowledge{}，因为会导致导入循环
+	// 我们将在 init.go 中注册 RecoverTasksLogic 函数
+	if RecoverTasksLogic != nil {
+		RecoverTasksLogic()
+	} else {
+		g.Log().Warning(ctx, "任务恢复函数未注册，无法恢复未完成任务")
+	}
 }

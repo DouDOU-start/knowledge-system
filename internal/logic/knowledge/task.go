@@ -55,9 +55,6 @@ func (s *Knowledge) InitTaskProcessor() {
 		go s.taskWorker()
 	}
 
-	// 启动任务恢复协程
-	go s.recoverTasks()
-
 	g.Log().Debug(gctx.New(), "任务处理器已初始化，工作协程数量:", concurrentWorkers)
 	taskProcessorInitialized = true
 }
@@ -422,55 +419,4 @@ func (s *Knowledge) processTaskItemContent(ctx context.Context, content string, 
 	}
 
 	return nil
-}
-
-// recoverTasks 恢复未完成的任务
-func (s *Knowledge) recoverTasks() {
-	ctx := context.Background()
-	g.Log().Debug(ctx, "开始恢复未完成的任务...")
-
-	// 查找所有未完成的任务
-	var entities []entity.ImportTask
-	err := dao.ImportTask.Ctx(ctx).
-		Where("status IN(?)", g.Slice{"pending", "processing"}).
-		OrderAsc("created_at").
-		Scan(&entities)
-
-	if err != nil {
-		g.Log().Error(ctx, "查询未完成任务失败:", err)
-		return
-	}
-
-	if len(entities) == 0 {
-		g.Log().Debug(ctx, "没有需要恢复的任务")
-		return
-	}
-
-	g.Log().Infof(ctx, "找到 %d 个未完成的任务", len(entities))
-
-	// 恢复任务
-	for _, e := range entities {
-		// 更新任务状态
-		g.Log().Infof(ctx, "恢复任务: %s, 原状态: %s", e.Id, e.Status)
-
-		// 标记为正在处理
-		dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
-			Status:    "processing",
-			Message:   "任务恢复处理中",
-			UpdatedAt: gtime.Now(),
-		}).Where(do.ImportTask{Id: e.Id}).Update()
-
-		// 将任务加入队列
-		err := EnqueueTask(ctx, e.Id, 0)
-		if err != nil {
-			g.Log().Error(ctx, "将任务加入队列失败:", err)
-			dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
-				Status:    "failed",
-				Message:   "恢复任务失败: " + err.Error(),
-				UpdatedAt: gtime.Now(),
-			}).Where(do.ImportTask{Id: e.Id}).Update()
-		}
-	}
-
-	g.Log().Info(ctx, "任务恢复完成")
 }

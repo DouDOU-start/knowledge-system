@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"knowledge-system-api/internal/controller/knowledge"
+	"knowledge-system-api/internal/service"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -37,6 +38,11 @@ var (
 
 			// 设置Swagger UI
 			s.SetSwaggerUITemplate(ScalarUITemplate)
+
+			// 将任务恢复放在服务启动前
+			g.Log().Info(ctx, "服务即将启动，初始化任务恢复...")
+			// 异步执行任务恢复，避免阻塞主线程
+			go service.RecoverUnfinishedTasks(ctx)
 
 			// 启动服务
 			s.Run()
