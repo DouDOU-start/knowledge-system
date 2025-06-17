@@ -31,7 +31,7 @@
 1. 克隆代码库
 
 ```bash
-git clone https://github.com/your-username/knowledge-system.git
+git clone https://github.com/DouDOU-start/knowledge-system.git
 cd knowledge-system
 ```
 
