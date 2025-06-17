@@ -397,8 +397,12 @@ func (s *Knowledge) processTaskItemContent(ctx context.Context, content string, 
 		return fmt.Errorf("LLM分类失败: %w", err)
 	}
 
-	// 3. 过滤低分标签
-	labels = helper.FilterLabels(labels, 70)
+	// 3. 过滤低分标签（使用配置的阈值）
+	labelThreshold := helper.GetLabelThreshold(ctx)
+	labelCountBeforeFilter := len(labels)
+	labels = helper.FilterLabels(labels, labelThreshold)
+	g.Log().Debug(ctx, fmt.Sprintf("标签过滤阈值: %d, 过滤前标签数: %d, 过滤后标签数: %d",
+		labelThreshold, labelCountBeforeFilter, len(labels)))
 
 	// 4. 向量化文本
 	vector, err := helper.Vectorize(ctx, content)
