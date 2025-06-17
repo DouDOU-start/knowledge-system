@@ -1,0 +1,60 @@
+# 服务器配置
+server:
+  address: ":8080"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+  serverRoot: "resource/public"
+  dumpRouterMap: true
+  routeOverWrite: true
+  accessLogEnabled: true
+  accessLogPattern: "access-{Ymd}.log"
+  errorLogEnabled: true
+  errorLogPattern: "error-{Ymd}.log"
+  pprofEnabled: true
+  maxHeaderBytes: 10240
+  clientMaxBodySize: "50MB"
+
+# 数据库配置
+database:
+  default:
+    link: "mysql:root:password@tcp(127.0.0.1:3306)/knowledge_system?charset=utf8mb4&parseTime=True&loc=Local"
+    debug: true
+    charset: "utf8mb4"
+    dryRun: false
+    maxIdle: 10
+    maxOpen: 100
+    maxLifetime: "30s"
+
+# 日志配置
+logger:
+  path: "logs"
+  level: "all"
+  stdout: true
+  ctxKeys: ["requestId", "userId", "traceId"]
+  rotateSize: "100M"
+  rotateExpire: "7d"
+  rotateBackupLimit: 10
+
+# 向量数据库配置
+qdrant:
+  url: "http://localhost:6333"
+  collection: "knowledge"
+  dimension: 768
+  
+# 嵌入模型配置
+embedding:
+  type: "ollama"  # ollama/openai
+  url: "http://localhost:11434"
+  model: "nomic-embed-text"
+  
+# LLM配置
+llm:
+  type: "langchain"  # langchain/openai
+  url: "http://localhost:11434"
+  model: "llama3"
+  
+# 应用配置
+app:
+  env: "dev"  # dev/prod
+  version: "1.0.0"
+  debug: true 

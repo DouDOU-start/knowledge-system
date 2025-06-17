@@ -1,0 +1,129 @@
+package cmd
+
+import (
+	"context"
+
+	"knowledge-system-api/internal/controller/knowledge"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
+	"github.com/gogf/gf/v2/os/gcmd"
+	"github.com/gogf/gf/v2/os/glog"
+)
+
+var (
+	Main = gcmd.Command{
+		Name:  "main",
+		Usage: "main",
+		Brief: "启动知识库检索系统API服务",
+		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
+			s := g.Server()
+
+			// 配置日志
+			var logConfig glog.Config
+			if err := g.Cfg().MustGet(ctx, "logger").Scan(&logConfig); err != nil {
+				g.Log().Warning(ctx, "加载日志配置失败:", err)
+			} else {
+				glog.SetConfig(logConfig)
+			}
+
+			// 配置服务
+			s.SetIndexFolder(true)
+			s.SetServerRoot("resource/public")
+
+			// 全局中间件
+			s.Use(ghttp.MiddlewareHandlerResponse)
+			s.Use(ghttp.MiddlewareCORS) // 允许跨域请求
+
+			// 注册API路由
+			s.Group("/api/v1", func(group *ghttp.RouterGroup) {
+				// 知识库API
+				group.Group("/knowledge", func(group *ghttp.RouterGroup) {
+					// 绑定控制器
+					group.Bind(
+						knowledge.NewV1(),
+					)
+				})
+
+				// 这里可以添加其他模块的API路由
+			})
+
+			// 设置Swagger UI
+			s.SetSwaggerPath("/swagger")
+			s.SetOpenApiPath("/api.json")
+			s.SetSwaggerUITemplate(ScalarUITemplate)
+
+			// 从配置文件获取服务器配置
+			var serverConfig ghttp.ServerConfig
+			if err := g.Cfg().MustGet(ctx, "server").Scan(&serverConfig); err != nil {
+				g.Log().Warning(ctx, "加载服务器配置失败:", err)
+			} else {
+				s.SetConfig(serverConfig)
+			}
+
+			// 启动服务
+			s.Run()
+			return nil
+		},
+	}
+)
+
+const (
+	SwaggerUITemplate = `
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="SwaggerUI"/>
+    <title>SwaggerUI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.10.5/swagger-ui.min.css" />
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.10.5/swagger-ui-bundle.js" crossorigin></script>
+<script>
+    window.onload = () => {
+        window.ui = SwaggerUIBundle({
+            url:    '{SwaggerUIDocUrl}',
+            dom_id: '#swagger-ui',
+        });
+    };
+</script>
+</body>
+</html>
+`
+
+	OpenapiUITemplate = `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>openAPI UI</title>
+  </head>
+  <body>
+    <div id="openapi-ui-container" spec-url="{SwaggerUIDocUrl}" theme="light"></div>
+    <script src="https://cdn.jsdelivr.net/npm/openapi-ui-dist@latest/lib/openapi-ui.umd.js"></script>
+  </body>
+</html>
+`
+
+	ScalarUITemplate = `
+<!doctype html>
+<html>
+  <head>
+    <title>知识库检索系统 API 文档</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script
+      id="api-reference"
+      data-url="{SwaggerUIDocUrl}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>
+`
+)
