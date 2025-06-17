@@ -91,10 +91,9 @@ func QdrantUpsert(id string, vector []float32, content string, repoName string, 
 		ID:     id,
 		Vector: vector,
 		Payload: map[string]interface{}{
-			"content":   content,
-			"repo_name": repoName,
-			"labels":    labelArr,
-			"summary":   summary,
+			"content": content,
+			"labels":  labelArr,
+			"summary": summary,
 		},
 	}
 	upsertReq := QdrantUpsertRequest{
@@ -104,7 +103,7 @@ func QdrantUpsert(id string, vector []float32, content string, repoName string, 
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/collections/%s/points?wait=true", cfg.URL, cfg.Collection)
+	url := fmt.Sprintf("%s/collections/%s/points?wait=true", cfg.URL, repoName)
 	// 新增：自动创建collection并重试
 	retry := false
 RETRY_UPSERT:
@@ -121,7 +120,7 @@ RETRY_UPSERT:
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 && !retry {
 		// collection不存在，自动创建
-		if err := createQdrantCollection(len(vector)); err != nil {
+		if err := createQdrantCollection(repoName, len(vector)); err != nil {
 			return fmt.Errorf("自动创建Qdrant collection失败: %w", err)
 		}
 		retry = true
@@ -207,10 +206,10 @@ func QdrantSearch(ctx context.Context, query string, vector []float32, repoName 
 }
 
 // 新增：自动创建collection
-func createQdrantCollection(vectorSize int) error {
+func createQdrantCollection(repoName string, vectorSize int) error {
 	cfg := GetQdrantConfig()
 
-	url := fmt.Sprintf("%s/collections/%s", cfg.URL, cfg.Collection)
+	url := fmt.Sprintf("%s/collections/%s", cfg.URL, repoName)
 	body := fmt.Sprintf(`{"vectors":{"size":%d,"distance":"Cosine"}}`, vectorSize)
 	req, err := http.NewRequest("PUT", url, bytes.NewReader([]byte(body)))
 	if err != nil {
