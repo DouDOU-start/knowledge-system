@@ -74,7 +74,7 @@ func EnqueueTask(ctx context.Context, taskId string, priority int) error {
 	}
 
 	// 保存到数据库
-	_, err := dao.TaskQueue.Ctx(ctx).Data(queueItem).Insert()
+	_, err := dao.TaskQueue.Ctx(ctx).Insert(queueItem)
 	if err != nil {
 		return fmt.Errorf("保存任务队列项失败: %w", err)
 	}
@@ -101,11 +101,16 @@ func DequeueTask() string {
 	case taskId := <-persistentQueue.memoryQueue:
 		// 更新数据库中的任务状态
 		ctx := gctx.New()
-		dao.TaskQueue.Ctx(ctx).Data(do.TaskQueue{
-			Status:    "processing",
-			StartedAt: gtime.Now(),
-			UpdatedAt: gtime.Now(),
-		}).Where("task_id=? AND status=?", taskId, "waiting").Update()
+		dao.TaskQueue.Ctx(ctx).
+			Fields("*").
+			Data(do.TaskQueue{
+				Status:    "processing",
+				StartedAt: gtime.Now(),
+				UpdatedAt: gtime.Now(),
+			}).
+			Where("task_id", taskId).
+			Where("status", "waiting").
+			Update()
 
 		return taskId
 	}
@@ -114,19 +119,21 @@ func DequeueTask() string {
 // taskConsumer 任务消费者，处理任务
 func (q *PersistentTaskQueue) taskConsumer() {
 	ctx := gctx.New()
-	for {
-		select {
-		case taskId := <-q.memoryQueue:
-			// 将任务状态更新为处理中
-			dao.TaskQueue.Ctx(ctx).Data(do.TaskQueue{
+	for taskId := range q.memoryQueue {
+		// 将任务状态更新为处理中
+		dao.TaskQueue.Ctx(ctx).
+			Fields("*").
+			Data(do.TaskQueue{
 				Status:    "processing",
 				StartedAt: gtime.Now(),
 				UpdatedAt: gtime.Now(),
-			}).Where("task_id=? AND status=?", taskId, "waiting").Update()
+			}).
+			Where("task_id", taskId).
+			Where("status", "waiting").
+			Update()
 
-			// 加入实际的处理队列
-			taskChan <- taskId
-		}
+		// 加入实际的处理队列
+		taskChan <- taskId
 	}
 }
 
@@ -141,8 +148,10 @@ func (q *PersistentTaskQueue) databasePoller() {
 
 		// 查询等待中的任务
 		var waitingTasks []entity.TaskQueue
+		// 使用标准链式操作查询
 		err := dao.TaskQueue.Ctx(ctx).
-			Where("status=?", "waiting").
+			Fields("*").
+			Where("status", "waiting").
 			OrderDesc("priority").
 			OrderAsc("created_at").
 			Limit(20).
@@ -161,7 +170,6 @@ func (q *PersistentTaskQueue) databasePoller() {
 			default:
 				// 内存队列已满，稍后再尝试
 				g.Log().Debug(ctx, "内存队列已满，任务将在下次轮询时处理:", task.TaskId)
-				break
 			}
 		}
 	}
@@ -174,9 +182,13 @@ func CompleteTask(ctx context.Context, taskId string, success bool) {
 		status = "failed"
 	}
 
-	dao.TaskQueue.Ctx(ctx).Data(do.TaskQueue{
-		Status:    status,
-		EndedAt:   gtime.Now(),
-		UpdatedAt: gtime.Now(),
-	}).Where("task_id=?", taskId).Update()
+	dao.TaskQueue.Ctx(ctx).
+		Fields("*").
+		Data(do.TaskQueue{
+			Status:    status,
+			EndedAt:   gtime.Now(),
+			UpdatedAt: gtime.Now(),
+		}).
+		Where("task_id", taskId).
+		Update()
 }

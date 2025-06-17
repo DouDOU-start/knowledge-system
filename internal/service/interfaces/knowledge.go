@@ -29,7 +29,7 @@ type KnowledgeService interface {
 	GetTaskStatus(ctx context.Context, taskId string) (*model.ImportTask, error)
 
 	// UpdateTaskStatus 更新任务状态
-	UpdateTaskStatus(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
+	UpdateTaskStatus(ctx context.Context, taskId string, status string, progress uint, processed uint, failed uint, message string) error
 
 	// GetAllRepos 获取所有知识库名称
 	GetAllRepos(ctx context.Context) ([]string, error)

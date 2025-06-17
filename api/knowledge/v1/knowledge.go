@@ -59,10 +59,10 @@ type TaskStatusReq struct {
 type TaskStatusRes struct {
 	TaskID    string `json:"task_id"`           // 任务ID
 	Status    string `json:"status"`            // 任务状态：pending, processing, completed, failed
-	Progress  int    `json:"progress"`          // 处理进度，0-100
-	Total     int    `json:"total"`             // 总条目数
-	Processed int    `json:"processed"`         // 已处理条目数
-	Failed    int    `json:"failed"`            // 失败条目数
+	Progress  uint   `json:"progress"`          // 处理进度，0-100
+	Total     uint   `json:"total"`             // 总条目数
+	Processed uint   `json:"processed"`         // 已处理条目数
+	Failed    uint   `json:"failed"`            // 失败条目数
 	Message   string `json:"message,omitempty"` // 任务相关信息
 }
 

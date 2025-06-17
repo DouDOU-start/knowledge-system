@@ -3,7 +3,7 @@
 gfcli:
   gen:
     dao:
-      - link: "mysql:root:root@tcp(127.0.0.1:3306)/knowledge-system"
+      - link: "mysql:root:root@tcp(127.0.0.1:3306)/knowledge_system"
         descriptionTag: true
 
   docker:

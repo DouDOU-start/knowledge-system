@@ -226,7 +226,7 @@ func (s *Knowledge) GetTaskStatus(ctx context.Context, taskID string) (*model.Im
 }
 
 // UpdateTaskStatus 更新任务状态
-func (s *Knowledge) UpdateTaskStatus(ctx context.Context, taskID string, status string, progress int, processed int, failed int, message string) error {
+func (s *Knowledge) UpdateTaskStatus(ctx context.Context, taskID string, status string, progress uint, processed uint, failed uint, message string) error {
 	_, err := dao.ImportTask.Ctx(ctx).Data(do.ImportTask{
 		Status:    status,
 		Progress:  progress,
@@ -289,7 +289,7 @@ func (s *Knowledge) processTask(ctx context.Context, taskID string) error {
 			s.UpdateTaskStatus(ctx, taskID, finalStatus, 100, task.Processed, task.Failed, finalMessage)
 		} else {
 			s.UpdateTaskStatus(ctx, taskID, "processing",
-				int(float64(task.Processed+task.Failed)/float64(task.Total)*100),
+				uint(float64(task.Processed+task.Failed)/float64(task.Total)*100),
 				task.Processed, task.Failed, "待处理队列为空，但仍有条目未完成")
 		}
 		return nil
@@ -317,12 +317,12 @@ func (s *Knowledge) processTask(ctx context.Context, taskID string) error {
 		repoName := itemData["repo_name"].(string)
 
 		// 更新任务状态
-		progress := int(float64(processed+failed+i) / float64(task.Total) * 100)
+		progress := uint(float64(processed+failed+uint(i)) / float64(task.Total) * 100)
 		s.UpdateTaskStatus(ctx, taskID, "processing", progress, processed, failed,
-			fmt.Sprintf("正在处理第 %d/%d 条", processed+failed+i+1, task.Total))
+			fmt.Sprintf("正在处理第 %d/%d 条", processed+failed+uint(i)+1, task.Total))
 
 		g.Log().Debug(ctx, fmt.Sprintf("处理任务 %s 的第 %d/%d 条: %d",
-			taskID, processed+failed+i+1, task.Total, item.Id))
+			taskID, processed+failed+uint(i)+1, task.Total, item.Id))
 
 		// 更新任务条目状态为处理中
 		dao.ImportTaskItem.Ctx(ctx).Data(do.ImportTaskItem{

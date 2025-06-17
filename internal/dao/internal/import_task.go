@@ -11,68 +11,72 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// KnowledgeDao is the data access object for the table knowledge.
-type KnowledgeDao struct {
+// ImportTaskDao is the data access object for the table import_task.
+type ImportTaskDao struct {
 	table    string             // table is the underlying table name of the DAO.
 	group    string             // group is the database configuration group name of the current DAO.
-	columns  KnowledgeColumns   // columns contains all the column names of Table for convenient usage.
+	columns  ImportTaskColumns  // columns contains all the column names of Table for convenient usage.
 	handlers []gdb.ModelHandler // handlers for customized model modification.
 }
 
-// KnowledgeColumns defines and stores column names for the table knowledge.
-type KnowledgeColumns struct {
-	Id        string // 唯一ID，服务端生成UUID
-	RepoName  string // 知识库名称
-	Content   string // 知识内容
-	Labels    string // 标签分数数组
-	Summary   string // 内容摘要
+// ImportTaskColumns defines and stores column names for the table import_task.
+type ImportTaskColumns struct {
+	Id        string // 任务ID
+	Status    string // 任务状态
+	Progress  string // 处理进度，0-100
+	Total     string // 总条目数
+	Processed string // 已处理条目数
+	Failed    string // 失败条目数
+	Message   string // 任务相关信息
 	CreatedAt string // 创建时间
 	UpdatedAt string // 更新时间
 }
 
-// knowledgeColumns holds the columns for the table knowledge.
-var knowledgeColumns = KnowledgeColumns{
+// importTaskColumns holds the columns for the table import_task.
+var importTaskColumns = ImportTaskColumns{
 	Id:        "id",
-	RepoName:  "repo_name",
-	Content:   "content",
-	Labels:    "labels",
-	Summary:   "summary",
+	Status:    "status",
+	Progress:  "progress",
+	Total:     "total",
+	Processed: "processed",
+	Failed:    "failed",
+	Message:   "message",
 	CreatedAt: "created_at",
 	UpdatedAt: "updated_at",
 }
 
-// NewKnowledgeDao creates and returns a new DAO object for table data access.
-func NewKnowledgeDao(handlers ...gdb.ModelHandler) *KnowledgeDao {
-	return &KnowledgeDao{
+// NewImportTaskDao creates and returns a new DAO object for table data access.
+func NewImportTaskDao(handlers ...gdb.ModelHandler) *ImportTaskDao {
+	return &ImportTaskDao{
 		group:    "default",
-		table:    "knowledge",
-		columns:  knowledgeColumns,
+		table:    "import_task",
+		columns:  importTaskColumns,
 		handlers: handlers,
 	}
 }
 
 // DB retrieves and returns the underlying raw database management object of the current DAO.
-func (dao *KnowledgeDao) DB() gdb.DB {
+func (dao *ImportTaskDao) DB() gdb.DB {
 	return g.DB(dao.group)
 }
 
 // Table returns the table name of the current DAO.
-func (dao *KnowledgeDao) Table() string {
+func (dao *ImportTaskDao) Table() string {
 	return dao.table
 }
 
 // Columns returns all column names of the current DAO.
-func (dao *KnowledgeDao) Columns() KnowledgeColumns {
+func (dao *ImportTaskDao) Columns() ImportTaskColumns {
 	return dao.columns
 }
 
 // Group returns the database configuration group name of the current DAO.
-func (dao *KnowledgeDao) Group() string {
+func (dao *ImportTaskDao) Group() string {
 	return dao.group
 }
 
 // Ctx creates and returns a Model for the current DAO. It automatically sets the context for the current operation.
-func (dao *KnowledgeDao) Ctx(ctx context.Context) *gdb.Model {
+func (dao *ImportTaskDao) Ctx(ctx context.Context) *gdb.Model {
 	model := dao.DB().Model(dao.table)
 	for _, handler := range dao.handlers {
 		model = handler(model)
@@ -86,6 +90,6 @@ func (dao *KnowledgeDao) Ctx(ctx context.Context) *gdb.Model {
 //
 // Note: Do not commit or roll back the transaction in function f,
 // as it is automatically handled by this function.
-func (dao *KnowledgeDao) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) (err error) {
+func (dao *ImportTaskDao) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) (err error) {
 	return dao.Ctx(ctx).Transaction(ctx, f)
 }

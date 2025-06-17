@@ -95,7 +95,7 @@ var (
 	GetTaskStatusLogic func(ctx context.Context, taskId string) (*model.ImportTask, error)
 
 	// UpdateTaskStatusLogic 更新任务状态逻辑
-	UpdateTaskStatusLogic func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error
+	UpdateTaskStatusLogic func(ctx context.Context, taskId string, status string, progress uint, processed uint, failed uint, message string) error
 
 	// GetAllReposLogic 获取所有知识库名称逻辑
 	GetAllReposLogic func(ctx context.Context) ([]string, error)
@@ -110,7 +110,7 @@ func RegisterKnowledgeLogic(
 	searchByHybrid func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
 	createImportTask func(ctx context.Context, items []model.TaskItem) (string, error),
 	getTaskStatus func(ctx context.Context, taskId string) (*model.ImportTask, error),
-	updateTaskStatus func(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error,
+	updateTaskStatus func(ctx context.Context, taskId string, status string, progress uint, processed uint, failed uint, message string) error,
 	getAllRepos func(ctx context.Context) ([]string, error),
 ) {
 	CreateKnowledgeLogic = createKnowledge
@@ -181,7 +181,7 @@ func (s *knowledgeServiceImpl) GetTaskStatus(ctx context.Context, taskId string)
 }
 
 // UpdateTaskStatus 更新任务状态
-func (s *knowledgeServiceImpl) UpdateTaskStatus(ctx context.Context, taskId string, status string, progress int, processed int, failed int, message string) error {
+func (s *knowledgeServiceImpl) UpdateTaskStatus(ctx context.Context, taskId string, status string, progress uint, processed uint, failed uint, message string) error {
 	if UpdateTaskStatusLogic == nil {
 		return context.Canceled
 	}
