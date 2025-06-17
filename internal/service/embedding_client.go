@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"sync"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 var (
@@ -10,35 +12,43 @@ var (
 	embeddingOnce           sync.Once
 )
 
-const defaultEmbeddingConfigPath = "hack/config.yaml"
-
 type EmbeddingConfig struct {
-	Backend string `yaml:"backend"`
+	Backend string `yaml:"backend" json:"backend"`
 	Ollama  struct {
-		BaseURL string `yaml:"base_url"`
-		Model   string `yaml:"model"`
-	} `yaml:"ollama"`
+		BaseURL string `yaml:"base_url" json:"base_url"`
+		Model   string `yaml:"model" json:"model"`
+	} `yaml:"ollama" json:"ollama"`
 }
 
 // LoadEmbeddingConfig 读取embedding相关配置
-func LoadEmbeddingConfig() (*EmbeddingConfig, error) {
-	var cfg struct {
-		Embedding EmbeddingConfig `yaml:"embedding"`
-	}
-	err := LoadYAMLConfig(defaultEmbeddingConfigPath, &cfg)
-	if err != nil {
+func LoadEmbeddingConfig(ctx context.Context) (*EmbeddingConfig, error) {
+	var cfg EmbeddingConfig
+	if err := g.Cfg().MustGet(ctx, "embedding").Scan(&cfg); err != nil {
 		return nil, err
 	}
-	return &cfg.Embedding, nil
+	return &cfg, nil
 }
 
 // GetEmbeddingClient 工厂方法，根据配置返回对应实现
 func GetEmbeddingClient() EmbeddingClient {
 	embeddingOnce.Do(func() {
-		cfg, err := LoadEmbeddingConfig()
+		ctx := context.Background()
+		cfg, err := LoadEmbeddingConfig(ctx)
 		if err != nil {
-			panic("加载embedding配置失败: " + err.Error())
+			g.Log().Errorf(ctx, "加载embedding配置失败: %v", err)
+			// 使用默认配置
+			cfg = &EmbeddingConfig{
+				Backend: "ollama",
+				Ollama: struct {
+					BaseURL string `yaml:"base_url" json:"base_url"`
+					Model   string `yaml:"model" json:"model"`
+				}{
+					BaseURL: "http://localhost:11434",
+					Model:   "nomic-embed-text",
+				},
+			}
 		}
+
 		switch cfg.Backend {
 		case "ollama":
 			embeddingClientInstance = NewOllamaEmbeddingClient(OllamaEmbeddingConfig{
@@ -47,7 +57,11 @@ func GetEmbeddingClient() EmbeddingClient {
 			})
 		// 预留其他后端
 		default:
-			panic("不支持的embedding后端: " + cfg.Backend)
+			g.Log().Errorf(ctx, "不支持的embedding后端: %s，使用默认ollama后端", cfg.Backend)
+			embeddingClientInstance = NewOllamaEmbeddingClient(OllamaEmbeddingConfig{
+				BaseURL: "http://localhost:11434",
+				Model:   "nomic-embed-text",
+			})
 		}
 	})
 	return embeddingClientInstance

@@ -8,7 +8,6 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 var (
@@ -18,18 +17,6 @@ var (
 		Brief: "启动知识库检索系统API服务",
 		Func: func(ctx context.Context, parser *gcmd.Parser) (err error) {
 			s := g.Server()
-
-			// 配置日志
-			var logConfig glog.Config
-			if err := g.Cfg().MustGet(ctx, "logger").Scan(&logConfig); err != nil {
-				g.Log().Warning(ctx, "加载日志配置失败:", err)
-			} else {
-				glog.SetConfig(logConfig)
-			}
-
-			// 配置服务
-			s.SetIndexFolder(true)
-			s.SetServerRoot("resource/public")
 
 			// 全局中间件
 			s.Use(ghttp.MiddlewareHandlerResponse)
@@ -49,17 +36,7 @@ var (
 			})
 
 			// 设置Swagger UI
-			s.SetSwaggerPath("/swagger")
-			s.SetOpenApiPath("/api.json")
 			s.SetSwaggerUITemplate(ScalarUITemplate)
-
-			// 从配置文件获取服务器配置
-			var serverConfig ghttp.ServerConfig
-			if err := g.Cfg().MustGet(ctx, "server").Scan(&serverConfig); err != nil {
-				g.Log().Warning(ctx, "加载服务器配置失败:", err)
-			} else {
-				s.SetConfig(serverConfig)
-			}
 
 			// 启动服务
 			s.Run()

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/ollama"
@@ -26,33 +27,45 @@ var (
 )
 
 type LLMConfig struct {
-	Backend string `yaml:"backend"`
+	Backend string `yaml:"backend" json:"backend"`
 	Ollama  struct {
-		BaseURL    string `yaml:"base_url"`
-		Model      string `yaml:"model"`
-		PromptPath string `yaml:"prompt_path"`
-	} `yaml:"ollama"`
+		BaseURL    string `yaml:"base_url" json:"base_url"`
+		Model      string `yaml:"model" json:"model"`
+		PromptPath string `yaml:"prompt_path" json:"prompt_path"`
+	} `yaml:"ollama" json:"ollama"`
 }
 
 // LoadLLMConfig 读取llm相关配置
-func LoadLLMConfig() (*LLMConfig, error) {
-	var cfg struct {
-		LLM LLMConfig `yaml:"llm"`
-	}
-	err := LoadYAMLConfig("hack/config.yaml", &cfg)
-	if err != nil {
+func LoadLLMConfig(ctx context.Context) (*LLMConfig, error) {
+	var cfg LLMConfig
+	if err := g.Cfg().MustGet(ctx, "llm").Scan(&cfg); err != nil {
 		return nil, err
 	}
-	return &cfg.LLM, nil
+	return &cfg, nil
 }
 
 // GetLLMClient 工厂方法，返回LLMClient实例
 func GetLLMClient() LLMClient {
 	llmOnce.Do(func() {
-		cfg, err := LoadLLMConfig()
+		ctx := context.Background()
+		cfg, err := LoadLLMConfig(ctx)
 		if err != nil {
-			panic("加载llm配置失败: " + err.Error())
+			g.Log().Errorf(ctx, "加载llm配置失败: %v", err)
+			// 使用默认配置
+			cfg = &LLMConfig{
+				Backend: "ollama",
+				Ollama: struct {
+					BaseURL    string `yaml:"base_url" json:"base_url"`
+					Model      string `yaml:"model" json:"model"`
+					PromptPath string `yaml:"prompt_path" json:"prompt_path"`
+				}{
+					BaseURL:    "http://localhost:11434",
+					Model:      "llama3",
+					PromptPath: "resource/prompts/classify.txt",
+				},
+			}
 		}
+
 		switch cfg.Backend {
 		case "ollama":
 			llmClientInstance = &LangchainOllamaLLMAdapter{
@@ -62,7 +75,12 @@ func GetLLMClient() LLMClient {
 			}
 		// 预留其他后端
 		default:
-			panic("不支持的llm后端: " + cfg.Backend)
+			g.Log().Errorf(ctx, "不支持的llm后端: %s，使用默认ollama后端", cfg.Backend)
+			llmClientInstance = &LangchainOllamaLLMAdapter{
+				BaseURL:    "http://localhost:11434",
+				Model:      "llama3",
+				PromptPath: "resource/prompts/classify.txt",
+			}
 		}
 	})
 	return llmClientInstance

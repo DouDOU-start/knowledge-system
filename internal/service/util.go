@@ -2,12 +2,9 @@ package service
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 
 	"knowledge-system-api/internal/model"
-
-	"gopkg.in/yaml.v3"
 )
 
 // CalcLabelScore 标签分数加权和
@@ -21,15 +18,6 @@ func CalcLabelScore(queryLabels, itemLabels []model.LabelScore) float32 {
 		}
 	}
 	return score
-}
-
-// LoadYAMLConfig 通用YAML配置加载
-func LoadYAMLConfig[T any](path string, out *T) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return yaml.Unmarshal(b, out)
 }
 
 // ExtractJSONFromLLMResponse 提取LLM返回中的JSON片段

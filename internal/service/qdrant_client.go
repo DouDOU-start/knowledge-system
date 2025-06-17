@@ -2,18 +2,57 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"knowledge-system-api/internal/model"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
-const (
-	QdrantBaseURL    = "http://localhost:6333"
-	QdrantCollection = "knowledge"
+var (
+	qdrantConfigInstance *QdrantConfig
+	qdrantOnce           sync.Once
 )
+
+// QdrantConfig Qdrant配置
+type QdrantConfig struct {
+	URL        string `yaml:"url" json:"url"`
+	Collection string `yaml:"collection" json:"collection"`
+	Dimension  int    `yaml:"dimension" json:"dimension"`
+}
+
+// LoadQdrantConfig 加载Qdrant配置
+func LoadQdrantConfig(ctx context.Context) (*QdrantConfig, error) {
+	var cfg QdrantConfig
+	if err := g.Cfg().MustGet(ctx, "qdrant").Scan(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// GetQdrantConfig 获取Qdrant配置单例
+func GetQdrantConfig() *QdrantConfig {
+	qdrantOnce.Do(func() {
+		ctx := context.Background()
+		cfg, err := LoadQdrantConfig(ctx)
+		if err != nil {
+			g.Log().Errorf(ctx, "加载qdrant配置失败: %v", err)
+			// 使用默认配置
+			cfg = &QdrantConfig{
+				URL:        "http://localhost:6333",
+				Collection: "knowledge",
+				Dimension:  768,
+			}
+		}
+		qdrantConfigInstance = cfg
+	})
+	return qdrantConfigInstance
+}
 
 // QdrantPoint Qdrant单条数据结构
 // 参考Qdrant API文档
@@ -34,6 +73,8 @@ type QdrantUpsertResponse struct {
 
 // QdrantUpsert 将知识条目写入Qdrant向量库
 func QdrantUpsert(id string, vector []float32, content string, labels []model.LabelScore, summary string) error {
+	cfg := GetQdrantConfig()
+
 	// 1. 检查向量
 	if len(vector) == 0 {
 		return fmt.Errorf("QdrantUpsert: 向量为空")
@@ -62,7 +103,7 @@ func QdrantUpsert(id string, vector []float32, content string, labels []model.La
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/collections/%s/points?wait=true", QdrantBaseURL, QdrantCollection)
+	url := fmt.Sprintf("%s/collections/%s/points?wait=true", cfg.URL, cfg.Collection)
 	// 新增：自动创建collection并重试
 	retry := false
 RETRY_UPSERT:
@@ -92,9 +133,67 @@ RETRY_UPSERT:
 	return nil
 }
 
+// QdrantSearch 向量搜索
+func QdrantSearch(ctx context.Context, query string, vector []float32, limit int) ([]model.VectorSearchResult, error) {
+	cfg := GetQdrantConfig()
+
+	if len(vector) == 0 {
+		return nil, fmt.Errorf("QdrantSearch: 向量为空")
+	}
+
+	body := map[string]interface{}{
+		"vector":       vector,
+		"top":          limit,
+		"with_payload": true,
+	}
+	jsonBody, _ := json.Marshal(body)
+	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.URL, cfg.Collection)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("qdrant search failed: %s, detail: %s", resp.Status, string(bodyBytes))
+	}
+
+	var result struct {
+		Result []struct {
+			ID      string                 `json:"id"`
+			Score   float64                `json:"score"`
+			Payload map[string]interface{} `json:"payload"`
+		} `json:"result"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析Qdrant响应失败: %w", err)
+	}
+
+	var out []model.VectorSearchResult
+	for _, p := range result.Result {
+		out = append(out, model.VectorSearchResult{
+			ID:      p.ID,
+			Score:   p.Score,
+			Payload: p.Payload,
+		})
+	}
+
+	return out, nil
+}
+
 // 新增：自动创建collection
 func createQdrantCollection(vectorSize int) error {
-	url := fmt.Sprintf("%s/collections/%s", QdrantBaseURL, QdrantCollection)
+	cfg := GetQdrantConfig()
+
+	url := fmt.Sprintf("%s/collections/%s", cfg.URL, cfg.Collection)
 	body := fmt.Sprintf(`{"vectors":{"size":%d,"distance":"Cosine"}}`, vectorSize)
 	req, err := http.NewRequest("PUT", url, bytes.NewReader([]byte(body)))
 	if err != nil {
@@ -108,7 +207,8 @@ func createQdrantCollection(vectorSize int) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("create collection failed: %s", resp.Status)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("create collection failed: %s, detail: %s", resp.Status, string(bodyBytes))
 	}
 	return nil
 }

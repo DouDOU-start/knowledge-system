@@ -13,7 +13,7 @@ func init() {
 	helper.SetVectorize(Vectorize)
 
 	// 初始化向量搜索函数
-	helper.SetVectorSearch(QdrantSearch)
+	helper.SetVectorSearch(InternalQdrantSearch)
 }
 
 // LLMClassifyByConfig 调用配置指定的大模型推理后端
@@ -37,11 +37,11 @@ func Vectorize(ctx context.Context, content string) ([]float32, error) {
 	return GetEmbeddingClient().Embed(ctx, content)
 }
 
-// QdrantSearch 调用 Qdrant 搜索
-func QdrantSearch(query string, vector []float32, limit int) ([]model.VectorSearchResult, error) {
-	// 这里实现向量搜索逻辑
-	// 临时实现，实际应该调用 Qdrant 客户端
-	return []model.VectorSearchResult{}, nil
+// InternalQdrantSearch 调用 Qdrant 搜索
+func InternalQdrantSearch(query string, vector []float32, limit int) ([]model.VectorSearchResult, error) {
+	// 调用 qdrant_client.go 中的实现
+	ctx := context.Background()
+	return QdrantSearch(ctx, query, vector, limit)
 }
 
 // 知识库服务实现

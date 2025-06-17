@@ -10,24 +10,3 @@ gfcli:
     build: "-a amd64 -s linux -p temp -ew"
     tagPrefixes:
       - my.image.pub/my-app
-
-llm:
-  backend: ollama
-  ollama:
-    base_url: http://localhost:11434
-    model: deepseek-r1:7b
-    prompt_path: prompt
-
-embedding:
-  backend: ollama
-  ollama:
-    base_url: http://localhost:11434
-    model: mxbai-embed-large:latest
-
-search:
-  hybrid:
-    alpha: 0.7
-    beta: 0.3
-  qdrant:
-    base_url: http://localhost:6333
-    collection: knowledge
