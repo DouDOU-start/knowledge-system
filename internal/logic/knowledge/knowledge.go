@@ -9,6 +9,7 @@ import (
 	"knowledge-system-api/internal/model/do"
 	"knowledge-system-api/internal/model/entity"
 	"sort"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -173,43 +174,19 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 	return results, nil
 }
 
-// SearchKnowledgeByHybrid 混合搜索知识条目（语义为主路+标签过滤/加权）
+// SearchKnowledgeByHybrid 混合搜索知识条目（基于用户意图的语义检索）
 func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
-	g.Log().Debug(ctx, "开始混合搜索，使用语义主路+标签过滤/加权模式")
+	g.Log().Debug(ctx, "开始混合搜索，基于用户意图的语义检索")
 
-	// 步骤1：语义向量检索（主路）
-	// 先进行语义检索，作为主要结果来源
-	if helper.Vectorize == nil {
-		return nil, gerror.New("向量化服务未初始化")
-	}
-
-	// 对用户查询进行向量化
-	vector, err := helper.Vectorize(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	// 调用 Qdrant 搜索，返回更多结果以便后续过滤
-	if helper.VectorSearch == nil {
-		return nil, gerror.New("向量搜索服务未初始化")
-	}
-
-	// 先获取更多的语义搜索结果，为后续过滤留出空间
-	expandedLimit := limit * 3
-	g.Log().Debugf(ctx, "语义检索阶段，扩大检索范围至 %d 条", expandedLimit)
-	qdrantResults, err := helper.VectorSearch(query, vector, repoName, expandedLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	// 步骤2：查询意图分析，提取相关标签
+	// 步骤1：先分析用户查询意图，提取关键标签
 	// 使用LLM对用户查询进行意图分析，提取出关键标签
 	var targetLabels []string
 	var targetLabelScores map[string]int = make(map[string]int)
+	var enhancedQuery string = query // 默认使用原始查询
 
 	if helper.LLMClassify != nil {
 		g.Log().Debug(ctx, "使用LLM分析用户查询意图")
-		labelScores, _, err := helper.LLMClassify(ctx, query)
+		labelScores, summary, err := helper.LLMClassify(ctx, query)
 		if err == nil && len(labelScores) > 0 {
 			// 只保留分数超过3分的标签
 			var filteredLabels []model.LabelScore
@@ -222,24 +199,56 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, r
 			}
 			if len(filteredLabels) > 0 {
 				g.Log().Debugf(ctx, "从查询中识别出的有效标签(分数>3): %v", targetLabels)
+
+				// 增强查询：将高分标签和原始查询组合
+				highPriorityLabels := getHighPriorityLabels(targetLabels, targetLabelScores, 2)
+				if len(highPriorityLabels) > 0 {
+					// 将高优先级标签添加到查询中，以增强语义搜索效果
+					enhancedQuery = query + " " + strings.Join(highPriorityLabels, " ")
+					g.Log().Debugf(ctx, "增强后的查询: %s", enhancedQuery)
+				}
 			} else {
 				g.Log().Debug(ctx, "未识别出分数超过3分的标签")
 			}
+
+			// 如果有摘要，使用摘要进一步理解查询意图
+			if summary != "" {
+				g.Log().Debugf(ctx, "查询意图摘要: %s", summary)
+				// 可以使用摘要进一步优化查询
+			}
 		} else if err != nil {
-			g.Log().Warningf(ctx, "LLM分类失败: %v，将跳过标签过滤/加权", err)
+			g.Log().Warningf(ctx, "LLM分类失败: %v，将使用原始查询", err)
 		}
 	} else {
-		g.Log().Warning(ctx, "LLM分类服务未初始化，将跳过标签过滤/加权")
+		g.Log().Warning(ctx, "LLM分类服务未初始化，将使用原始查询")
 	}
 
-	// 步骤3：获取完整知识条目并应用标签过滤/加权逻辑
+	// 步骤2：向量化查询（使用增强后的查询）
+	if helper.Vectorize == nil {
+		return nil, gerror.New("向量化服务未初始化")
+	}
+
+	// 对用户查询进行向量化（使用增强后的查询）
+	vector, err := helper.Vectorize(ctx, enhancedQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤3：调用 Qdrant 搜索（使用增强后的查询和向量）
+	if helper.VectorSearch == nil {
+		return nil, gerror.New("向量搜索服务未初始化")
+	}
+
+	// 使用增强后的查询进行向量搜索
+	// 如果有高分标签，可以启用基于标签的过滤
+	g.Log().Debugf(ctx, "使用增强查询进行语义检索")
+	qdrantResults, err := helper.VectorSearch(enhancedQuery, vector, repoName, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤4：处理搜索结果
 	var results []model.SearchResult
-	var filteredCount int = 0
-	var boostedCount int = 0
-
-	// 获取高优先级标签（前2个最重要的标签）
-	highPriorityLabels := getHighPriorityLabels(targetLabels, targetLabelScores, 2)
-
 	for _, item := range qdrantResults {
 		// 获取完整知识条目
 		knowledgeItem, err := s.GetKnowledgeById(ctx, item.ID)
@@ -257,73 +266,23 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, r
 			continue
 		}
 
-		// 创建基本结果
+		// 创建结果项
 		result := model.SearchResult{
 			ID:       knowledgeItem.ID,
 			RepoName: knowledgeItem.RepoName,
 			Content:  knowledgeItem.Content,
 			Labels:   knowledgeItem.Labels,
 			Summary:  knowledgeItem.Summary,
-			Score:    item.Score, // 初始分数来自向量检索
+			Score:    item.Score, // 使用向量搜索得分
 		}
 
-		// 如果有目标标签，应用标签过滤/加权逻辑
-		if len(targetLabels) > 0 {
-			// 标签过滤：检查文档是否包含与查询意图相关的标签
-			containsTargetLabel := false
-			labelBoost := 0.0
-
-			// 先对文档的标签建立映射，便于检查
-			docLabelMap := make(map[string]int)
-			for _, docLabel := range knowledgeItem.Labels {
-				docLabelMap[docLabel.LabelID] = docLabel.Score
-			}
-
-			// 检查查询中的标签是否在文档中存在
-			for _, targetLabel := range targetLabels {
-				if docScore, exists := docLabelMap[targetLabel]; exists {
-					containsTargetLabel = true
-					// 根据标签在查询和文档中的重要性给予加权
-					queryScore := targetLabelScores[targetLabel]
-					weightFactor := float64(docScore*queryScore) / 100.0
-					// 限制加权因子的范围
-					if weightFactor > 0.5 {
-						weightFactor = 0.5
-					}
-					labelBoost += weightFactor
-				}
-			}
-
-			// 高优先级标签加权：检查文档是否包含查询中最重要的标签
-			highPriorityBoost := false
-			for _, hpLabel := range highPriorityLabels {
-				if docLabelMap[hpLabel] > 0 {
-					// 文档包含高优先级标签，给予额外提升
-					result.Score = result.Score * 1.2
-					boostedCount++
-					highPriorityBoost = true
-					break // 找到一个匹配就足够了
-				}
-			}
-
-			// 如果包含任何目标标签，提升得分
-			if containsTargetLabel {
-				result.Score = result.Score * (1.0 + labelBoost)
-				if !highPriorityBoost {
-					boostedCount++ // 避免重复计数
-				}
-			} else {
-				// 如果不包含任何目标标签，稍微降低得分
-				// 但不完全过滤掉，因为语义相似性仍然是重要因素
-				result.Score = result.Score * 0.95
-				filteredCount++
-			}
-		}
+		// 添加一些调试信息
+		g.Log().Debugf(ctx, "匹配项: ID=%s, 分数=%.4f", knowledgeItem.ID, item.Score)
 
 		results = append(results, result)
 	}
 
-	// 步骤4：关键词增强（如果语义搜索结果不足）
+	// 步骤5：关键词补充（如果结果不足）
 	if len(results) < limit {
 		g.Log().Debugf(ctx, "语义搜索结果不足，使用关键词搜索补充")
 		keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, limit-len(results))
@@ -337,7 +296,7 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, r
 			// 添加非重复的关键词搜索结果
 			for _, kr := range keywordResults {
 				if _, exists := existingIds[kr.ID]; !exists {
-					// 关键词搜索的结果降低一些权重，确保语义搜索结果优先
+					// 关键词搜索的结果降低一些权重
 					kr.Score = kr.Score * 0.8
 					results = append(results, kr)
 				}
@@ -355,8 +314,7 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, r
 		results = results[:limit]
 	}
 
-	g.Log().Debugf(ctx, "混合搜索完成: 过滤的文档数=%d, 加权的文档数=%d, 最终返回结果数=%d",
-		filteredCount, boostedCount, len(results))
+	g.Log().Debugf(ctx, "混合搜索完成: 共返回 %d 条结果", len(results))
 
 	return results, nil
 }
