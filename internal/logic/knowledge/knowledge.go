@@ -211,11 +211,20 @@ func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, r
 		g.Log().Debug(ctx, "使用LLM分析用户查询意图")
 		labelScores, _, err := helper.LLMClassify(ctx, query)
 		if err == nil && len(labelScores) > 0 {
+			// 只保留分数超过3分的标签
+			var filteredLabels []model.LabelScore
 			for _, ls := range labelScores {
-				targetLabels = append(targetLabels, ls.LabelID)
-				targetLabelScores[ls.LabelID] = ls.Score
+				if ls.Score > 3 { // 过滤低分标签
+					filteredLabels = append(filteredLabels, ls)
+					targetLabels = append(targetLabels, ls.LabelID)
+					targetLabelScores[ls.LabelID] = ls.Score
+				}
 			}
-			g.Log().Debugf(ctx, "从查询中识别出的标签: %v", targetLabels)
+			if len(filteredLabels) > 0 {
+				g.Log().Debugf(ctx, "从查询中识别出的有效标签(分数>3): %v", targetLabels)
+			} else {
+				g.Log().Debug(ctx, "未识别出分数超过3分的标签")
+			}
 		} else if err != nil {
 			g.Log().Warningf(ctx, "LLM分类失败: %v，将跳过标签过滤/加权", err)
 		}
