@@ -97,23 +97,21 @@ func DequeueTask() string {
 	InitPersistentQueue()
 
 	// 从内存队列获取任务
-	select {
-	case taskId := <-persistentQueue.memoryQueue:
-		// 更新数据库中的任务状态
-		ctx := gctx.New()
-		dao.TaskQueue.Ctx(ctx).
-			Fields("*").
-			Data(do.TaskQueue{
-				Status:    "processing",
-				StartedAt: gtime.Now(),
-				UpdatedAt: gtime.Now(),
-			}).
-			Where("task_id", taskId).
-			Where("status", "waiting").
-			Update()
+	taskId := <-persistentQueue.memoryQueue
+	// 更新数据库中的任务状态
+	ctx := gctx.New()
+	dao.TaskQueue.Ctx(ctx).
+		Fields("*").
+		Data(do.TaskQueue{
+			Status:    "processing",
+			StartedAt: gtime.Now(),
+			UpdatedAt: gtime.Now(),
+		}).
+		Where("task_id", taskId).
+		Where("status", "waiting").
+		Update()
 
-		return taskId
-	}
+	return taskId
 }
 
 // taskConsumer 任务消费者，处理任务

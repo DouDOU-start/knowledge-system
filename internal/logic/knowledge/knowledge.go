@@ -263,7 +263,7 @@ func (s *Knowledge) RecoverTasks() {
 	// 恢复每个任务
 	for _, task := range tasks {
 		taskId := task.Id
-		g.Log().Infof(ctx, "恢复任务 %s，当前状态: %s, 进度: %d%%",
+		g.Log().Infof(ctx, "恢复任务 %s, 当前状态: %s, 进度: %d%%",
 			taskId, task.Status, task.Progress)
 
 		// 这里可以根据任务类型调用不同的处理逻辑
