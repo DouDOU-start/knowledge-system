@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS `task_queue` (
   KEY `idx_waiting_tasks` (`status`, `priority`, `created_at`) COMMENT '用于快速查询待处理任务'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务队列表';
 
+-- 创建反馈表
+CREATE TABLE IF NOT EXISTS `feedback` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `session_id` varchar(64) NOT NULL COMMENT '用户会话ID',
+  `user_query` text NOT NULL COMMENT '用户查询内容',
+  `retrieved_knowledge_id` varchar(36) NOT NULL COMMENT '被检索到的知识ID',
+  `action` ENUM('like', 'dislike') NOT NULL COMMENT '反馈操作类型',
+  `timestamp` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '反馈时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_knowledge_id` (`retrieved_knowledge_id`),
+  KEY `idx_timestamp` (`timestamp`),
+  CONSTRAINT `fk_feedback_knowledge` FOREIGN KEY (`retrieved_knowledge_id`) REFERENCES `knowledge` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户反馈数据表';
+
 
 -- 步骤 7: 创建用户并授权 (可选，根据实际情况修改)
 -- CREATE USER 'knowledge_user'@'%' IDENTIFIED BY 'knowledge_password';

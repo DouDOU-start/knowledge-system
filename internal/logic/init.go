@@ -3,6 +3,7 @@ package logic
 
 import (
 	"knowledge-system-api/internal/helper"
+	"knowledge-system-api/internal/logic/feedback"
 	"knowledge-system-api/internal/logic/knowledge"
 	"knowledge-system-api/internal/service"
 )
@@ -23,6 +24,10 @@ func InitServiceLogic() {
 		k.GetAllRepos,
 		k.RecoverTasks,
 	)
+
+	// 初始化反馈服务的业务逻辑
+	f := feedback.New()
+	service.RegisterFeedback(f)
 }
 
 func init() {

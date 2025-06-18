@@ -16,4 +16,5 @@ type IKnowledgeV1 interface {
 	TaskStatus(ctx context.Context, req *v1.TaskStatusReq) (res *v1.TaskStatusRes, err error)
 	Classify(ctx context.Context, req *v1.ClassifyReq) (res *v1.ClassifyRes, err error)
 	Search(ctx context.Context, req *v1.SearchReq) (res *v1.SearchRes, err error)
+	GetRepos(ctx context.Context, req *v1.GetReposReq) (res *v1.GetReposRes, err error)
 }

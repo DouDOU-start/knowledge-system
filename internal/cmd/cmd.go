@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 
+	"knowledge-system-api/internal/controller/feedback"
 	"knowledge-system-api/internal/controller/knowledge"
 	"knowledge-system-api/internal/service"
 
@@ -30,6 +31,7 @@ var (
 					// 绑定控制器
 					group.Bind(
 						knowledge.NewV1(),
+						feedback.NewV1(),
 					)
 				})
 
