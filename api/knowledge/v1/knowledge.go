@@ -69,9 +69,8 @@ type TaskStatusRes struct {
 // 单条内容标签打分
 //
 type ClassifyReq struct {
-	g.Meta   `path:"/classify" method:"post" tags:"Knowledge" summary:"单条内容标签打分"`
-	Content  string `json:"content" v:"required#内容不能为空"`
-	RepoName string `json:"repo_name" v:"required#知识库名称不能为空"`
+	g.Meta  `path:"/classify" method:"post" tags:"Knowledge" summary:"单条内容标签打分"`
+	Content string `json:"content" v:"required#内容不能为空"`
 }
 
 type ClassifyRes struct {
@@ -84,8 +83,8 @@ type ClassifyRes struct {
 type SearchReq struct {
 	g.Meta   `path:"/search" method:"post" tags:"Knowledge" summary:"知识检索"`
 	Query    string `json:"query" v:"required#检索关键词不能为空"`
-	RepoName string `json:"repo_name" v:"#知识库名称，不填则搜索所有知识库"`
-	Mode     string `json:"mode" v:"in:keyword,semantic,hybrid#检索模式必须是 keyword/semantic/hybrid 之一"`
+	RepoName string `json:"repo_name"` // 知识库名称，不填则搜索所有知识库
+	Mode     string `json:"mode" v:"required|in:keyword,semantic,hybrid#检索模式必须是 keyword/semantic/hybrid 之一"`
 	TopK     int    `json:"top_k" v:"min:1#返回结果数量必须大于0"`
 }
 
