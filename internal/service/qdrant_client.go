@@ -46,7 +46,7 @@ func GetQdrantConfig() *QdrantConfig {
 			cfg = &QdrantConfig{
 				URL:        "http://localhost:6333",
 				Collection: "knowledge",
-				Dimension:  768,
+				Dimension:  1024,
 			}
 		}
 		qdrantConfigInstance = cfg
@@ -148,31 +148,17 @@ func QdrantSearch(ctx context.Context, query string, vector []float32, repoName 
 		"with_payload": true,
 	}
 
-	// 如果指定了知识库名称，添加过滤条件
-	if repoName != "" {
-		searchRequest["filter"] = map[string]interface{}{
-			"must": []map[string]interface{}{
-				{
-					"key": "repo_name",
-					"match": map[string]interface{}{
-						"value": repoName,
-					},
-				},
-			},
-		}
-	}
-
 	jsonBody, _ := json.Marshal(searchRequest)
-	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.URL, cfg.Collection)
+	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.URL, repoName)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+		return nil, fmt.Errorf("qdrant请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+		return nil, fmt.Errorf("qdrant请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
