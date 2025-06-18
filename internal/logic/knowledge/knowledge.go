@@ -8,6 +8,7 @@ import (
 	"knowledge-system-api/internal/model"
 	"knowledge-system-api/internal/model/do"
 	"knowledge-system-api/internal/model/entity"
+	"sort"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -172,51 +173,214 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 	return results, nil
 }
 
-// SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
+// SearchKnowledgeByHybrid 混合搜索知识条目（语义为主路+标签过滤/加权）
 func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
-	// 先进行语义搜索
-	semanticResults, err := s.SearchKnowledgeBySemantic(ctx, query, repoName, limit)
+	g.Log().Debug(ctx, "开始混合搜索，使用语义主路+标签过滤/加权模式")
+
+	// 步骤1：语义向量检索（主路）
+	// 先进行语义检索，作为主要结果来源
+	if helper.Vectorize == nil {
+		return nil, gerror.New("向量化服务未初始化")
+	}
+
+	// 对用户查询进行向量化
+	vector, err := helper.Vectorize(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	// 再进行关键词搜索
-	keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, limit)
+	// 调用 Qdrant 搜索，返回更多结果以便后续过滤
+	if helper.VectorSearch == nil {
+		return nil, gerror.New("向量搜索服务未初始化")
+	}
+
+	// 先获取更多的语义搜索结果，为后续过滤留出空间
+	expandedLimit := limit * 3
+	g.Log().Debugf(ctx, "语义检索阶段，扩大检索范围至 %d 条", expandedLimit)
+	qdrantResults, err := helper.VectorSearch(query, vector, repoName, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
 
-	// 合并结果，去重
-	resultMap := make(map[string]model.SearchResult)
+	// 步骤2：查询意图分析，提取相关标签
+	// 使用LLM对用户查询进行意图分析，提取出关键标签
+	var targetLabels []string
+	var targetLabelScores map[string]int = make(map[string]int)
 
-	// 先添加语义搜索结果
-	for _, r := range semanticResults {
-		resultMap[r.ID] = r
-	}
-
-	// 再添加关键词搜索结果，如果已存在则保留分数更高的
-	for _, r := range keywordResults {
-		if existing, ok := resultMap[r.ID]; ok {
-			if r.Score > existing.Score {
-				resultMap[r.ID] = r
+	if helper.LLMClassify != nil {
+		g.Log().Debug(ctx, "使用LLM分析用户查询意图")
+		labelScores, _, err := helper.LLMClassify(ctx, query)
+		if err == nil && len(labelScores) > 0 {
+			for _, ls := range labelScores {
+				targetLabels = append(targetLabels, ls.LabelID)
+				targetLabelScores[ls.LabelID] = ls.Score
 			}
-		} else {
-			resultMap[r.ID] = r
+			g.Log().Debugf(ctx, "从查询中识别出的标签: %v", targetLabels)
+		} else if err != nil {
+			g.Log().Warningf(ctx, "LLM分类失败: %v，将跳过标签过滤/加权", err)
+		}
+	} else {
+		g.Log().Warning(ctx, "LLM分类服务未初始化，将跳过标签过滤/加权")
+	}
+
+	// 步骤3：获取完整知识条目并应用标签过滤/加权逻辑
+	var results []model.SearchResult
+	var filteredCount int = 0
+	var boostedCount int = 0
+
+	// 获取高优先级标签（前2个最重要的标签）
+	highPriorityLabels := getHighPriorityLabels(targetLabels, targetLabelScores, 2)
+
+	for _, item := range qdrantResults {
+		// 获取完整知识条目
+		knowledgeItem, err := s.GetKnowledgeById(ctx, item.ID)
+		if err != nil {
+			g.Log().Warning(ctx, "获取知识条目失败", err)
+			continue
+		}
+
+		if knowledgeItem == nil {
+			continue
+		}
+
+		// 如果指定了知识库名称，但结果不匹配，则跳过
+		if repoName != "" && knowledgeItem.RepoName != repoName {
+			continue
+		}
+
+		// 创建基本结果
+		result := model.SearchResult{
+			ID:       knowledgeItem.ID,
+			RepoName: knowledgeItem.RepoName,
+			Content:  knowledgeItem.Content,
+			Labels:   knowledgeItem.Labels,
+			Summary:  knowledgeItem.Summary,
+			Score:    item.Score, // 初始分数来自向量检索
+		}
+
+		// 如果有目标标签，应用标签过滤/加权逻辑
+		if len(targetLabels) > 0 {
+			// 标签过滤：检查文档是否包含与查询意图相关的标签
+			containsTargetLabel := false
+			labelBoost := 0.0
+
+			// 先对文档的标签建立映射，便于检查
+			docLabelMap := make(map[string]int)
+			for _, docLabel := range knowledgeItem.Labels {
+				docLabelMap[docLabel.LabelID] = docLabel.Score
+			}
+
+			// 检查查询中的标签是否在文档中存在
+			for _, targetLabel := range targetLabels {
+				if docScore, exists := docLabelMap[targetLabel]; exists {
+					containsTargetLabel = true
+					// 根据标签在查询和文档中的重要性给予加权
+					queryScore := targetLabelScores[targetLabel]
+					weightFactor := float64(docScore*queryScore) / 100.0
+					// 限制加权因子的范围
+					if weightFactor > 0.5 {
+						weightFactor = 0.5
+					}
+					labelBoost += weightFactor
+				}
+			}
+
+			// 高优先级标签加权：检查文档是否包含查询中最重要的标签
+			highPriorityBoost := false
+			for _, hpLabel := range highPriorityLabels {
+				if docLabelMap[hpLabel] > 0 {
+					// 文档包含高优先级标签，给予额外提升
+					result.Score = result.Score * 1.2
+					boostedCount++
+					highPriorityBoost = true
+					break // 找到一个匹配就足够了
+				}
+			}
+
+			// 如果包含任何目标标签，提升得分
+			if containsTargetLabel {
+				result.Score = result.Score * (1.0 + labelBoost)
+				if !highPriorityBoost {
+					boostedCount++ // 避免重复计数
+				}
+			} else {
+				// 如果不包含任何目标标签，稍微降低得分
+				// 但不完全过滤掉，因为语义相似性仍然是重要因素
+				result.Score = result.Score * 0.95
+				filteredCount++
+			}
+		}
+
+		results = append(results, result)
+	}
+
+	// 步骤4：关键词增强（如果语义搜索结果不足）
+	if len(results) < limit {
+		g.Log().Debugf(ctx, "语义搜索结果不足，使用关键词搜索补充")
+		keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, limit-len(results))
+		if err == nil && len(keywordResults) > 0 {
+			// 创建已有结果的ID映射，避免重复
+			existingIds := make(map[string]bool)
+			for _, r := range results {
+				existingIds[r.ID] = true
+			}
+
+			// 添加非重复的关键词搜索结果
+			for _, kr := range keywordResults {
+				if _, exists := existingIds[kr.ID]; !exists {
+					// 关键词搜索的结果降低一些权重，确保语义搜索结果优先
+					kr.Score = kr.Score * 0.8
+					results = append(results, kr)
+				}
+			}
 		}
 	}
 
-	// 转换为数组
-	var results []model.SearchResult
-	for _, r := range resultMap {
-		results = append(results, r)
-	}
+	// 按得分排序
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score // 降序排列
+	})
 
 	// 限制返回数量
 	if len(results) > limit {
 		results = results[:limit]
 	}
 
+	g.Log().Debugf(ctx, "混合搜索完成: 过滤的文档数=%d, 加权的文档数=%d, 最终返回结果数=%d",
+		filteredCount, boostedCount, len(results))
+
 	return results, nil
+}
+
+// getHighPriorityLabels 获取高优先级标签（分数最高的前N个标签）
+func getHighPriorityLabels(labels []string, scores map[string]int, topN int) []string {
+	if len(labels) <= topN {
+		return labels // 如果标签总数小于等于topN，直接返回全部
+	}
+
+	// 创建标签-分数对
+	type labelScore struct {
+		label string
+		score int
+	}
+
+	var pairs []labelScore
+	for _, label := range labels {
+		pairs = append(pairs, labelScore{label: label, score: scores[label]})
+	}
+
+	// 按分数降序排序
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].score > pairs[j].score
+	})
+
+	// 提取前topN个标签
+	result := make([]string, 0, topN)
+	for i := 0; i < topN && i < len(pairs); i++ {
+		result = append(result, pairs[i].label)
+	}
+
+	return result
 }
 
 // GetAllRepos 获取所有知识库名称
