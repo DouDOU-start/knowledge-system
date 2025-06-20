@@ -9,9 +9,7 @@ import (
 	"knowledge-system-api/internal/model/do"
 	"knowledge-system-api/internal/model/entity"
 	"sort"
-	"strings"
 
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -121,38 +119,100 @@ func (s *Knowledge) SearchKnowledgeByKeyword(ctx context.Context, keyword string
 }
 
 // SearchKnowledgeBySemantic 语义搜索知识条目
-func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
-	// 调用向量搜索服务
-	if helper.Vectorize == nil {
-		return nil, gerror.New("向量化服务未初始化")
+// func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
+// 	// 调用向量搜索服务
+// 	if helper.Vectorize == nil {
+// 		return nil, gerror.New("向量化服务未初始化")
+// 	}
+
+// 	vector, err := helper.Vectorize(ctx, query)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	// 调用 Qdrant 搜索
+// 	if helper.VectorSearch == nil {
+// 		return nil, gerror.New("向量搜索服务未初始化")
+// 	}
+
+// 	// 这里传入 repoName 参数
+// 	qdrantResults, err := helper.VectorSearch(query, repoName, content)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	var results []model.SearchResult
+// 	for _, item := range qdrantResults {
+// 		// 获取完整知识条目
+// 		knowledgeItem, err := s.GetKnowledgeById(ctx, item.ID)
+// 		if err != nil {
+// 			g.Log().Warning(ctx, "获取知识条目失败", err)
+// 			continue
+// 		}
+
+// 		if knowledgeItem == nil {
+// 			continue
+// 		}
+
+// 		// 如果指定了知识库名称，但结果不匹配，则跳过
+// 		if repoName != "" && knowledgeItem.RepoName != repoName {
+// 			continue
+// 		}
+
+// 		results = append(results, model.SearchResult{
+// 			ID:       knowledgeItem.ID,
+// 			RepoName: knowledgeItem.RepoName,
+// 			Content:  knowledgeItem.Content,
+// 			Labels:   knowledgeItem.Labels,
+// 			Summary:  knowledgeItem.Summary,
+// 			Score:    item.Score,
+// 		})
+// 	}
+
+// 	return results, nil
+// }
+
+// SearchKnowledgeByHybrid 混合搜索知识条目（基于用户意图的语义检索）
+func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit uint64) ([]model.SearchResult, error) {
+	g.Log().Debug(ctx, "开始混合搜索，基于标签和语义检索")
+
+	// 步骤1：分析用户查询意图，提取关键标签
+	var targetLabels []model.LabelScore
+
+	if helper.LLMClassify != nil {
+		g.Log().Debug(ctx, "分析用户查询意图")
+		labelScores, _, err := helper.LLMClassify(ctx, query)
+		if err == nil && len(labelScores) > 0 {
+			for _, ls := range labelScores {
+				if ls.Score > 3 { // 过滤低分标签
+					targetLabels = append(targetLabels, ls)
+				}
+			}
+			// 按分数排序，选取高优先级标签
+			// if len(targetLabels) > 0 {
+			// 	g.Log().Debugf(ctx, "从查询中提取的有效标签: %v", targetLabels)
+			// 	targetLabels = getHighPriorityLabels(targetLabels, labelMap, 2) // 只取最重要的2个标签
+			// 	g.Log().Debugf(ctx, "用于检索的高优先级标签: %v", targetLabels)
+			// }
+		} else if err != nil {
+			g.Log().Warningf(ctx, "LLM分析失败: %v，将使用纯向量搜索", err)
+		}
 	}
 
-	vector, err := helper.Vectorize(ctx, query)
+	// 使用高优先级标签进行过滤的向量检索
+	g.Log().Debugf(ctx, "开始向量检索，标签数量: %d", len(targetLabels))
+	qdrantResults, err := helper.VectorSearch(repoName, query, targetLabels, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// 调用 Qdrant 搜索
-	if helper.VectorSearch == nil {
-		return nil, gerror.New("向量搜索服务未初始化")
-	}
-
-	// 这里传入 repoName 参数
-	qdrantResults, err := helper.VectorSearch(query, vector, repoName, limit)
-	if err != nil {
-		return nil, err
-	}
-
+	// 步骤4：处理结果
 	var results []model.SearchResult
 	for _, item := range qdrantResults {
 		// 获取完整知识条目
 		knowledgeItem, err := s.GetKnowledgeById(ctx, item.ID)
-		if err != nil {
-			g.Log().Warning(ctx, "获取知识条目失败", err)
-			continue
-		}
-
-		if knowledgeItem == nil {
+		if err != nil || knowledgeItem == nil {
+			g.Log().Warningf(ctx, "获取知识条目失败: %v", err)
 			continue
 		}
 
@@ -161,6 +221,7 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 			continue
 		}
 
+		// 添加到结果集
 		results = append(results, model.SearchResult{
 			ID:       knowledgeItem.ID,
 			RepoName: knowledgeItem.RepoName,
@@ -171,153 +232,70 @@ func (s *Knowledge) SearchKnowledgeBySemantic(ctx context.Context, query string,
 		})
 	}
 
-	return results, nil
-}
+	// 步骤5：如果结果不足，使用关键词搜索补充
+	// if uint64(len(results)) < limit {
+	// 	g.Log().Debugf(ctx, "向量搜索结果不足，使用关键词搜索补充")
+	// 	keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, int(limit)-len(results))
+	// 	if err == nil && len(keywordResults) > 0 {
+	// 		// 避免重复
+	// 		existingIds := make(map[string]bool)
+	// 		for _, r := range results {
+	// 			existingIds[r.ID] = true
+	// 		}
 
-// SearchKnowledgeByHybrid 混合搜索知识条目（基于用户意图的语义检索）
-func (s *Knowledge) SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error) {
-	g.Log().Debug(ctx, "开始混合搜索，基于用户意图的语义检索")
-
-	// 步骤1：先分析用户查询意图，提取关键标签
-	// 使用LLM对用户查询进行意图分析，提取出关键标签
-	var targetLabels []string
-	var targetLabelScores map[string]int = make(map[string]int)
-	var enhancedQuery string = query // 默认使用原始查询
-
-	if helper.LLMClassify != nil {
-		g.Log().Debug(ctx, "使用LLM分析用户查询意图")
-		labelScores, summary, err := helper.LLMClassify(ctx, query)
-		if err == nil && len(labelScores) > 0 {
-			// 只保留分数超过3分的标签
-			var filteredLabels []model.LabelScore
-			for _, ls := range labelScores {
-				if ls.Score > 3 { // 过滤低分标签
-					filteredLabels = append(filteredLabels, ls)
-					targetLabels = append(targetLabels, ls.LabelID)
-					targetLabelScores[ls.LabelID] = ls.Score
-				}
-			}
-			if len(filteredLabels) > 0 {
-				g.Log().Debugf(ctx, "从查询中识别出的有效标签(分数>3): %v", targetLabels)
-
-				// 增强查询：将高分标签和原始查询组合
-				highPriorityLabels := getHighPriorityLabels(targetLabels, targetLabelScores, 2)
-				if len(highPriorityLabels) > 0 {
-					// 将高优先级标签添加到查询中，以增强语义搜索效果
-					enhancedQuery = query + " " + strings.Join(highPriorityLabels, " ")
-					g.Log().Debugf(ctx, "增强后的查询: %s", enhancedQuery)
-				}
-			} else {
-				g.Log().Debug(ctx, "未识别出分数超过3分的标签")
-			}
-
-			// 如果有摘要，使用摘要进一步理解查询意图
-			if summary != "" {
-				g.Log().Debugf(ctx, "查询意图摘要: %s", summary)
-				// 可以使用摘要进一步优化查询
-			}
-		} else if err != nil {
-			g.Log().Warningf(ctx, "LLM分类失败: %v，将使用原始查询", err)
-		}
-	} else {
-		g.Log().Warning(ctx, "LLM分类服务未初始化，将使用原始查询")
-	}
-
-	// 步骤2：向量化查询（使用增强后的查询）
-	if helper.Vectorize == nil {
-		return nil, gerror.New("向量化服务未初始化")
-	}
-
-	// 对用户查询进行向量化（使用增强后的查询）
-	vector, err := helper.Vectorize(ctx, enhancedQuery)
-	if err != nil {
-		return nil, err
-	}
-
-	// 步骤3：调用 Qdrant 搜索（使用增强后的查询和向量）
-	if helper.VectorSearch == nil {
-		return nil, gerror.New("向量搜索服务未初始化")
-	}
-
-	// 使用增强后的查询进行向量搜索
-	// 如果有高分标签，可以启用基于标签的过滤
-	g.Log().Debugf(ctx, "使用增强查询进行语义检索")
-	qdrantResults, err := helper.VectorSearch(enhancedQuery, vector, repoName, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	// 步骤4：处理搜索结果
-	var results []model.SearchResult
-	for _, item := range qdrantResults {
-		// 获取完整知识条目
-		knowledgeItem, err := s.GetKnowledgeById(ctx, item.ID)
-		if err != nil {
-			g.Log().Warning(ctx, "获取知识条目失败", err)
-			continue
-		}
-
-		if knowledgeItem == nil {
-			continue
-		}
-
-		// 如果指定了知识库名称，但结果不匹配，则跳过
-		if repoName != "" && knowledgeItem.RepoName != repoName {
-			continue
-		}
-
-		// 创建结果项
-		result := model.SearchResult{
-			ID:       knowledgeItem.ID,
-			RepoName: knowledgeItem.RepoName,
-			Content:  knowledgeItem.Content,
-			Labels:   knowledgeItem.Labels,
-			Summary:  knowledgeItem.Summary,
-			Score:    item.Score, // 使用向量搜索得分
-		}
-
-		// 添加一些调试信息
-		g.Log().Debugf(ctx, "匹配项: ID=%s, 分数=%.4f", knowledgeItem.ID, item.Score)
-
-		results = append(results, result)
-	}
-
-	// 步骤5：关键词补充（如果结果不足）
-	if len(results) < limit {
-		g.Log().Debugf(ctx, "语义搜索结果不足，使用关键词搜索补充")
-		keywordResults, err := s.SearchKnowledgeByKeyword(ctx, query, repoName, limit-len(results))
-		if err == nil && len(keywordResults) > 0 {
-			// 创建已有结果的ID映射，避免重复
-			existingIds := make(map[string]bool)
-			for _, r := range results {
-				existingIds[r.ID] = true
-			}
-
-			// 添加非重复的关键词搜索结果
-			for _, kr := range keywordResults {
-				if _, exists := existingIds[kr.ID]; !exists {
-					// 关键词搜索的结果降低一些权重
-					kr.Score = kr.Score * 0.8
-					results = append(results, kr)
-				}
-			}
-		}
-	}
+	// 		// 添加非重复的结果
+	// 		for _, kr := range keywordResults {
+	// 			if !existingIds[kr.ID] {
+	// 				// 关键词搜索结果降低权重
+	// 				kr.Score = kr.Score * 0.7
+	// 				results = append(results, kr)
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	// 按得分排序
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score // 降序排列
+		return results[i].Score > results[j].Score
 	})
 
 	// 限制返回数量
-	if len(results) > limit {
+	if len(results) > int(limit) {
 		results = results[:limit]
 	}
 
 	g.Log().Debugf(ctx, "混合搜索完成: 共返回 %d 条结果", len(results))
-
 	return results, nil
 }
+
+// calculateLabelMatchScore 计算文档标签与查询标签的匹配度分数
+// func calculateLabelMatchScore(docLabels []model.LabelScore, queryLabels []string, queryLabelScores map[string]int) float64 {
+// 	var score float64 = 0.0
+
+// 	// 创建文档标签映射，便于查找
+// 	docLabelMap := make(map[string]int)
+// 	for _, label := range docLabels {
+// 		docLabelMap[label.LabelID] = label.Score
+// 	}
+
+// 	// 计算匹配分数
+// 	for _, queryLabel := range queryLabels {
+// 		if docScore, exists := docLabelMap[queryLabel]; exists {
+// 			// 文档包含查询标签，增加分数
+// 			queryScore := queryLabelScores[queryLabel]
+// 			// 标签在文档和查询中都重要，分数加权
+// 			weightFactor := float64(docScore*queryScore) / 500.0
+// 			score += weightFactor
+// 		}
+// 	}
+
+// 	// 限制最大分数
+// 	if score > 1.0 {
+// 		score = 1.0
+// 	}
+
+// 	return score
+// }
 
 // getHighPriorityLabels 获取高优先级标签（分数最高的前N个标签）
 func getHighPriorityLabels(labels []string, scores map[string]int, topN int) []string {

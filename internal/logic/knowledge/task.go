@@ -401,14 +401,8 @@ func (s *Knowledge) processTaskItemContent(ctx context.Context, content string, 
 	g.Log().Debug(ctx, fmt.Sprintf("标签过滤阈值: %d, 过滤前标签数: %d, 过滤后标签数: %d",
 		labelThreshold, labelCountBeforeFilter, len(labels)))
 
-	// 4. 向量化文本
-	vector, err := helper.Vectorize(ctx, content)
-	if err != nil {
-		return fmt.Errorf("向量化失败: %w", err)
-	}
-
 	// 5. 存入向量数据库
-	if err := helper.QdrantUpsert(id, vector, content, repoName, labels, summary); err != nil {
+	if err := helper.QdrantUpsert(ctx, repoName, id, content, summary, labels); err != nil {
 		return fmt.Errorf("保存到向量库失败: %w", err)
 	}
 

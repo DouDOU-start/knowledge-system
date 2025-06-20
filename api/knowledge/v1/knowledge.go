@@ -10,8 +10,8 @@ type KnowledgeItem struct {
 
 // LabelScore 标签分数
 type LabelScore struct {
-	LabelID string `json:"label_id" v:"required#标签ID不能为空"`
-	Score   int    `json:"score" v:"min:0#分数不能为负数"`
+	Name  string  `json:"name" v:"required#标签不能为空"`
+	Score float32 `json:"score" v:"min:0#分数不能为负数"`
 }
 
 // KnowledgeResult 知识检索结果

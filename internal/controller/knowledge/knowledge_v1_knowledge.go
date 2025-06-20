@@ -35,18 +35,11 @@ func (c *ControllerV1) BatchImport(ctx context.Context, req *v1.BatchImportReq) 
 		// 过滤标签
 		filtered := service.FilterLabels(labels, 3)
 
-		// 向量化
-		vector, err := service.Vectorize(ctx, item.Content)
-		if err != nil {
-			g.Log().Errorf(ctx, "向量化失败: %v", err)
-			return nil, gerror.NewCodef(gcode.CodeInternalError, "向量化失败: %s", err.Error())
-		}
-
 		// 始终生成新的 ID，不使用用户提供的 ID
-		id := uuid.NewString()
+		id := uuid.New().String()
 
 		// 存入向量数据库
-		if err := service.QdrantUpsert(id, vector, item.Content, req.RepoName, filtered, summary); err != nil {
+		if err := service.QdrantUpsert(ctx, req.RepoName, id, item.Content, summary, filtered); err != nil {
 			g.Log().Errorf(ctx, "Qdrant入库失败: %v", err)
 			return nil, gerror.NewCodef(gcode.CodeInternalError, "Qdrant入库失败: %s", err.Error())
 		}
@@ -120,25 +113,27 @@ func (c *ControllerV1) Classify(ctx context.Context, req *v1.ClassifyReq) (res *
 	// 参数校验由框架自动完成
 
 	// 调用LLM进行标签分类和摘要生成
-	labels, summary, err := service.LLMClassifyByConfig(ctx, req.Content)
-	if err != nil {
-		g.Log().Errorf(ctx, "LLM推理失败: %v", err)
-		return nil, gerror.NewCodef(gcode.CodeInternalError, "LLM推理失败: %s", err.Error())
-	}
+	// labels, summary, err := service.LLMClassifyByConfig(ctx, req.Content)
+	// if err != nil {
+	// 	g.Log().Errorf(ctx, "LLM推理失败: %v", err)
+	// 	return nil, gerror.NewCodef(gcode.CodeInternalError, "LLM推理失败: %s", err.Error())
+	// }
 
 	// 转换为API响应格式
-	var outLabels []v1.LabelScore
-	for _, l := range labels {
-		outLabels = append(outLabels, v1.LabelScore{
-			LabelID: l.LabelID,
-			Score:   l.Score,
-		})
-	}
+	// var outLabels []v1.LabelScore
+	// for _, l := range labels {
+	// 	outLabels = append(outLabels, v1.LabelScore{
+	// 		LabelID: l.LabelID,
+	// 		Score:   l.Score,
+	// 	})
+	// }
 
-	return &v1.ClassifyRes{
-		Labels:  outLabels,
-		Summary: summary,
-	}, nil
+	// return &v1.ClassifyRes{
+	// 	Labels:  outLabels,
+	// 	Summary: summary,
+	// }, nil
+
+	return nil, gerror.NewCode(gcode.CodeNotImplemented, "单条内容标签打分功能尚未实现，请稍后再试")
 }
 
 // Search 知识检索
@@ -174,8 +169,8 @@ func (c *ControllerV1) Search(ctx context.Context, req *v1.SearchReq) (res *v1.S
 		var outLabels []v1.LabelScore
 		for _, l := range item.Labels {
 			outLabels = append(outLabels, v1.LabelScore{
-				LabelID: l.LabelID,
-				Score:   l.Score,
+				Name:  l.Name,
+				Score: l.Score,
 			})
 		}
 

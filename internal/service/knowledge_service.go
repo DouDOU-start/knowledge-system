@@ -14,9 +14,9 @@ func init() {
 	helper.SetVectorize(Vectorize)
 
 	// 初始化向量搜索函数
-	helper.SetVectorSearch(func(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
+	helper.SetVectorSearch(func(repoName string, content string, labels []model.LabelScore, limit uint64) ([]model.VectorSearchResult, error) {
 		ctx := context.Background()
-		return QdrantSearch(ctx, query, vector, repoName, limit)
+		return QdrantSearch(ctx, repoName, content, labels, limit)
 	})
 
 	// 初始化 LLM 分类函数
@@ -40,7 +40,7 @@ func LLMClassifyByConfig(ctx context.Context, content string) (labels []model.La
 }
 
 // FilterLabels 过滤低分标签
-func FilterLabels(labels []model.LabelScore, threshold int) []model.LabelScore {
+func FilterLabels(labels []model.LabelScore, threshold float32) []model.LabelScore {
 	var filtered []model.LabelScore
 	for _, l := range labels {
 		if l.Score >= threshold {
@@ -56,11 +56,11 @@ func Vectorize(ctx context.Context, content string) ([]float32, error) {
 }
 
 // InternalQdrantSearch 调用 Qdrant 搜索
-func InternalQdrantSearch(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
-	// 调用 qdrant_client.go 中的实现
-	ctx := context.Background()
-	return QdrantSearch(ctx, query, vector, repoName, limit)
-}
+// func InternalQdrantSearch(query string, vector []float32, repoName string, limit int) ([]model.VectorSearchResult, error) {
+// 	// 调用 qdrant_client.go 中的实现
+// 	ctx := context.Background()
+// 	return QdrantSearch(ctx, query, vector, repoName, limit)
+// }
 
 // 知识库服务接口实现
 type knowledgeServiceImpl struct{}
@@ -110,8 +110,8 @@ var (
 func RegisterKnowledgeLogic(
 	createKnowledge func(ctx context.Context, id, repoName, content string, labels []model.LabelScore, summary string) error,
 	getKnowledgeById func(ctx context.Context, id string) (*model.KnowledgeItem, error),
-	searchByKeyword func(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error),
-	searchBySemantic func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
+	// searchByKeyword func(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error),
+	// searchBySemantic func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
 	searchByHybrid func(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error),
 	createImportTask func(ctx context.Context, items []model.TaskItem) (string, error),
 	getTaskStatus func(ctx context.Context, taskId string) (*model.ImportTask, error),
@@ -121,8 +121,8 @@ func RegisterKnowledgeLogic(
 ) {
 	CreateKnowledgeLogic = createKnowledge
 	GetKnowledgeByIdLogic = getKnowledgeById
-	SearchKnowledgeByKeywordLogic = searchByKeyword
-	SearchKnowledgeBySemanticLogic = searchBySemantic
+	// SearchKnowledgeByKeywordLogic = searchByKeyword
+	// SearchKnowledgeBySemanticLogic = searchBySemantic
 	SearchKnowledgeByHybridLogic = searchByHybrid
 	CreateImportTaskLogic = createImportTask
 	GetTaskStatusLogic = getTaskStatus

@@ -3,22 +3,21 @@ package service
 import (
 	"fmt"
 	"regexp"
-
-	"knowledge-system-api/internal/model"
+	// "regexp"
 )
 
 // CalcLabelScore 标签分数加权和
-func CalcLabelScore(queryLabels, itemLabels []model.LabelScore) float32 {
-	var score float32
-	for _, ql := range queryLabels {
-		for _, il := range itemLabels {
-			if ql.LabelID == il.LabelID {
-				score += float32(ql.Score * il.Score)
-			}
-		}
-	}
-	return score
-}
+// func CalcLabelScore(queryLabels, itemLabels []model.LabelScore) float32 {
+// 	var score float32
+// 	for _, ql := range queryLabels {
+// 		for _, il := range itemLabels {
+// 			if ql.LabelID == il.LabelID {
+// 				score += float32(ql.Score * il.Score)
+// 			}
+// 		}
+// 	}
+// 	return score
+// }
 
 // ExtractJSONFromLLMResponse 提取LLM返回中的JSON片段
 func ExtractJSONFromLLMResponse(resp string) (string, error) {

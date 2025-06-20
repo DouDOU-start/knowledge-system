@@ -137,9 +137,9 @@ func (a *LangchainOllamaLLMAdapter) Classify(ctx context.Context, content string
 
 	// 解析大模型返回的JSON
 	var parsed struct {
-		C1TopicScores map[string]int `json:"C1_Topic_Scores"`
-		C2TypeScores  map[string]int `json:"C2_Type_Scores"`
-		Summary       string         `json:"summary"`
+		C1TopicScores map[string]float32 `json:"C1_Topic_Scores"`
+		C2TypeScores  map[string]float32 `json:"C2_Type_Scores"`
+		Summary       string             `json:"summary"`
 	}
 	if err = json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		glog.Errorf(ctx, "解析大模型JSON失败: %v, resp=%s", err, jsonStr)
@@ -147,10 +147,10 @@ func (a *LangchainOllamaLLMAdapter) Classify(ctx context.Context, content string
 		return
 	}
 	for k, v := range parsed.C1TopicScores {
-		labels = append(labels, model.LabelScore{LabelID: k, Score: v})
+		labels = append(labels, model.LabelScore{Name: k, Score: v})
 	}
 	for k, v := range parsed.C2TypeScores {
-		labels = append(labels, model.LabelScore{LabelID: k, Score: v})
+		labels = append(labels, model.LabelScore{Name: k, Score: v})
 	}
 	summary = parsed.Summary
 	return

@@ -194,10 +194,10 @@ func semanticSearch(ctx context.Context, vector []float32, repoName string, topK
 
 // hybridSearch 语义分数+标签分数融合
 func hybridSearch(ctx context.Context, vector []float32, repoName string, queryLabels []model.LabelScore, topK int) ([]model.KnowledgeItem, error) {
-	cfg, err := loadSearchConfig()
-	if err != nil {
-		return nil, fmt.Errorf("加载配置失败: %w", err)
-	}
+	// cfg, err := loadSearchConfig()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("加载配置失败: %w", err)
+	// }
 	points, err := qdrantSearch(ctx, vector, repoName, topK*2)
 	if err != nil {
 		return nil, fmt.Errorf("向量检索失败: %w", err)
@@ -217,11 +217,11 @@ func hybridSearch(ctx context.Context, vector []float32, repoName string, queryL
 	for _, p := range points {
 		id2score[p.ID] = p.Score
 	}
-	for i := range items {
-		labelScore := CalcLabelScore(queryLabels, items[i].Labels)
-		finalScore := id2score[items[i].ID]*cfg.Hybrid.Alpha + labelScore*cfg.Hybrid.Beta
-		items[i].Vector = []float32{finalScore}
-	}
+	// for i := range items {
+	// 	labelScore := CalcLabelScore(queryLabels, items[i].Labels)
+	// 	finalScore := id2score[items[i].ID]*cfg.Hybrid.Alpha + labelScore*cfg.Hybrid.Beta
+	// 	items[i].Vector = []float32{finalScore}
+	// }
 	sort.Slice(items, func(i, j int) bool { return items[i].Vector[0] > items[j].Vector[0] })
 	if len(items) > topK {
 		items = items[:topK]

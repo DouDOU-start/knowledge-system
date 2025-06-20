@@ -9,10 +9,10 @@ import (
 type LLMClassifyFunc func(ctx context.Context, content string) ([]model.LabelScore, string, error)
 
 // FilterLabelsFunc 标签过滤函数类型
-type FilterLabelsFunc func(labels []model.LabelScore, threshold int) []model.LabelScore
+type FilterLabelsFunc func(labels []model.LabelScore, threshold float32) []model.LabelScore
 
 // QdrantUpsertFunc Qdrant 向量库插入函数类型
-type QdrantUpsertFunc func(id string, vector []float32, content string, repoName string, labels []model.LabelScore, summary string) error
+type QdrantUpsertFunc func(ctx context.Context, repoName string, id string, content string, summary string, labels []model.LabelScore) error
 
 // KnowledgeServiceFunc 获取知识库服务接口实例函数类型
 type KnowledgeServiceFunc func() interface{}

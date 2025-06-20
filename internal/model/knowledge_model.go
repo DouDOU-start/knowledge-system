@@ -18,8 +18,8 @@ type KnowledgeItem struct {
 
 // LabelScore 标签分数
 type LabelScore struct {
-	LabelID string `json:"label_id"` // 标签ID
-	Score   int    `json:"score"`    // 分数
+	Name  string  `json:"name"`  // 标签名称
+	Score float32 `json:"score"` // 分数
 }
 
 // SearchResult 搜索结果
@@ -29,13 +29,13 @@ type SearchResult struct {
 	Content  string       `json:"content"`   // 知识内容
 	Labels   []LabelScore `json:"labels"`    // 标签分数数组
 	Summary  string       `json:"summary"`   // 内容摘要
-	Score    float64      `json:"score"`     // 搜索匹配分数
+	Score    float32      `json:"score"`     // 搜索匹配分数
 }
 
 // VectorSearchResult 向量搜索结果
 type VectorSearchResult struct {
 	ID      string                 `json:"id"`      // 条目ID
-	Score   float64                `json:"score"`   // 搜索分数
+	Score   float32                `json:"score"`   // 搜索分数
 	Payload map[string]interface{} `json:"payload"` // 负载数据
 }
 
