@@ -18,9 +18,9 @@ func InitServiceLogic() {
 	service.RegisterKnowledgeLogic(
 		k.CreateKnowledge,
 		k.GetKnowledgeById,
-		k.SearchKnowledgeByKeyword,
+		// k.SearchKnowledgeByKeyword,
 		// k.SearchKnowledgeBySemantic,
-		// k.SearchKnowledgeByHybrid,
+		k.SearchKnowledgeByHybrid,
 		k.CreateImportTask,
 		k.GetTaskStatus,
 		k.UpdateTaskStatus,

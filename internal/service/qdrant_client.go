@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"knowledge-system-api/internal/helper"
 	"knowledge-system-api/internal/model"
-	"sort"
 	"sync"
 	"time"
 
@@ -279,46 +278,19 @@ func QdrantSearch(ctx context.Context, repoName string, content string, labels [
 	defer cancel()
 
 	// 生成稀疏向量 (用于预查询)
-	// 使用map确保索引的唯一性
-	sparseIndexMap := make(map[uint32]float32)
+	var sparseIndices []uint32
+	var sparseValues []float32
 
 	for _, l := range labels {
 		// 调用GetID方法
 		id, found := helper.Dictionary().GetID(ctx, l.Name)
-
-		// 如果在我们的预定义字典中找到了这个标签
 		if found {
-			// 如果该索引已存在，则取较大的分数
-			if existingScore, exists := sparseIndexMap[id]; exists {
-				if l.Score > existingScore {
-					sparseIndexMap[id] = l.Score
-				}
-			} else {
-				sparseIndexMap[id] = l.Score
-			}
+			sparseIndices = append(sparseIndices, id)
+			sparseValues = append(sparseValues, l.Score)
 		} else {
 			// 如果标签未在字典中找到，可以选择记录一个警告日志
 			g.Log().Warningf(ctx, "标签 '%s' 在预定义字典中未找到，已忽略。", l.Name)
 		}
-	}
-
-	// 将map转换为有序列表
-	var sparseIndices []uint32
-	var sparseValues []float32
-
-	// 1. 收集所有键
-	for idx := range sparseIndexMap {
-		sparseIndices = append(sparseIndices, idx)
-	}
-
-	// 2. 排序键（Qdrant要求索引必须排序）
-	sort.Slice(sparseIndices, func(i, j int) bool {
-		return sparseIndices[i] < sparseIndices[j]
-	})
-
-	// 3. 按排序后的键收集值
-	for _, idx := range sparseIndices {
-		sparseValues = append(sparseValues, sparseIndexMap[idx])
 	}
 
 	// 日志记录稀疏向量信息
@@ -335,27 +307,27 @@ func QdrantSearch(ctx context.Context, repoName string, content string, labels [
 		return nil, fmt.Errorf("向量化内容失败: %w", err)
 	}
 
-	// 定义第一阶段的 Prefetch 查询
-	prefetchCoreQuery := &qdrant.Query{
-		Variant: &qdrant.Query_Nearest{
-			Nearest: &qdrant.VectorInput{
-				Variant: &qdrant.VectorInput_Sparse{
-					Sparse: &qdrant.SparseVector{
-						Values:  sparseValues,
-						Indices: sparseIndices,
+	prefetchLimit := limit * 3 // 预查询的限制，通常设置为主查询的3倍，以确保有足够的候选项
+	labelsSparse := "labels_sparse"
+	prefetchQuery := &qdrant.PrefetchQuery{
+		Using: &labelsSparse, // 使用稀疏向量进行预查询
+		Query: &qdrant.Query{
+			Variant: &qdrant.Query_Nearest{
+				Nearest: &qdrant.VectorInput{
+					Variant: &qdrant.VectorInput_Sparse{
+						Sparse: &qdrant.SparseVector{
+							Values:  sparseValues,
+							Indices: sparseIndices,
+						},
 					},
 				},
 			},
-		},
+		}, // 将上面定义的查询逻辑放入
+		Limit: &prefetchLimit, // 直接在 PrefetchQuery 层面设置 Limit
 	}
 
-	prefetchLimit := limit * 3 // 预查询的限制，通常设置为主查询的3倍，以确保有足够的候选项
-	prefetchQuery := &qdrant.PrefetchQuery{
-		Query: prefetchCoreQuery, // 将上面定义的查询逻辑放入
-		Limit: &prefetchLimit,    // 直接在 PrefetchQuery 层面设置 Limit
-	}
-
-	// 定义第二阶段的主查询 (基于稀疏向量)
+	// 定义第二阶段的主查询 (基于密集向量)
+	contentDense := "content_dense"
 	mainQuery := &qdrant.Query{
 		Variant: &qdrant.Query_Nearest{
 			Nearest: &qdrant.VectorInput{
@@ -372,6 +344,7 @@ func QdrantSearch(ctx context.Context, repoName string, content string, labels [
 		CollectionName: repoName,
 		Prefetch:       []*qdrant.PrefetchQuery{prefetchQuery}, // 放入预查询
 		Query:          mainQuery,                              // 放入主查询
+		Using:          &contentDense,                          // 指定使用的向量名称
 		Limit:          &limit,                                 // 最终限制
 		WithPayload:    qdrant.NewWithPayload(true),            // 返回Payload
 	}
@@ -397,10 +370,12 @@ func QdrantSearch(ctx context.Context, repoName string, content string, labels [
 		}
 
 		searchResults = append(searchResults, model.VectorSearchResult{
-			ID:      point.Id.String(),
+			ID:      point.Id.GetUuid(),
 			Score:   point.Score,
 			Payload: payload,
 		})
+
+		g.Log().Debugf(ctx, "找到结果: ID=%s, Score=%.4f, Payload=%v", point.Id.String(), point.Score, payload)
 	}
 
 	g.Log().Debugf(ctx, "Qdrant搜索完成，找到 %d 条结果", len(searchResults))

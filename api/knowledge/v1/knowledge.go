@@ -21,6 +21,7 @@ type KnowledgeResult struct {
 	Content  string       `json:"content"`
 	Labels   []LabelScore `json:"labels"`
 	Summary  string       `json:"summary"`
+	Score    float32      `json:"score"` // 检索分数
 }
 
 // 批量导入

@@ -148,12 +148,8 @@ func (c *ControllerV1) Search(ctx context.Context, req *v1.SearchReq) (res *v1.S
 	// 根据模式选择不同的搜索方式
 	var items []model.SearchResult
 	switch req.Mode {
-	case "keyword":
-		items, err = service.KnowledgeService().SearchKnowledgeByKeyword(ctx, req.Query, req.RepoName, req.TopK)
-	case "semantic":
-		items, err = service.KnowledgeService().SearchKnowledgeBySemantic(ctx, req.Query, req.RepoName, req.TopK)
 	case "hybrid", "":
-		items, err = service.KnowledgeService().SearchKnowledgeByHybrid(ctx, req.Query, req.RepoName, req.TopK)
+		items, err = service.KnowledgeService().SearchKnowledgeByHybrid(ctx, req.Query, req.RepoName, uint64(req.TopK))
 	default:
 		return nil, gerror.NewCode(gcode.CodeInvalidParameter, "不支持的搜索模式")
 	}
@@ -180,6 +176,7 @@ func (c *ControllerV1) Search(ctx context.Context, req *v1.SearchReq) (res *v1.S
 			Content:  item.Content,
 			Labels:   outLabels,
 			Summary:  item.Summary,
+			Score:    item.Score,
 		})
 	}
 

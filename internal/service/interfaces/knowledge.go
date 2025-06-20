@@ -13,14 +13,8 @@ type KnowledgeService interface {
 	// GetKnowledgeById 根据ID获取知识条目
 	GetKnowledgeById(ctx context.Context, id string) (*model.KnowledgeItem, error)
 
-	// SearchKnowledgeByKeyword 关键词搜索知识条目
-	SearchKnowledgeByKeyword(ctx context.Context, keyword string, repoName string, limit int) ([]model.SearchResult, error)
-
-	// SearchKnowledgeBySemantic 语义搜索知识条目
-	SearchKnowledgeBySemantic(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
-
 	// SearchKnowledgeByHybrid 混合搜索知识条目（关键词+语义）
-	SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit int) ([]model.SearchResult, error)
+	SearchKnowledgeByHybrid(ctx context.Context, query string, repoName string, limit uint64) ([]model.SearchResult, error)
 
 	// CreateImportTask 创建导入任务
 	CreateImportTask(ctx context.Context, items []model.TaskItem) (string, error)
