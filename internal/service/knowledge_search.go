@@ -82,17 +82,17 @@ func qdrantSearch(ctx context.Context, vector []float32, repoName string, topK i
 	url := fmt.Sprintf("%s/collections/%s/points/search", cfg.Qdrant.BaseURL, cfg.Qdrant.Collection)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+		return nil, fmt.Errorf("qdrant请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Qdrant请求失败: %w", err)
+		return nil, fmt.Errorf("qdrant请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Qdrant返回错误状态码 %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("qdrant返回错误状态码 %d: %s", resp.StatusCode, string(body))
 	}
 	var result struct {
 		Result []struct {
@@ -312,14 +312,14 @@ func loadSearchConfig() (*searchConfig, error) {
 	cfg := defaultSearchConfig
 	b, err := os.ReadFile("hack/config.yaml")
 	if err != nil {
-		g.Log().Warningf(nil, "加载配置文件失败，使用默认配置: %v", err)
+		g.Log().Warningf(context.TODO(), "加载配置文件失败，使用默认配置: %v", err)
 		return &cfg, nil
 	}
 	var fullCfg struct {
 		Search searchConfig `yaml:"search"`
 	}
 	if err := yaml.Unmarshal(b, &fullCfg); err != nil {
-		g.Log().Warningf(nil, "解析配置文件失败，使用默认配置: %v", err)
+		g.Log().Warningf(context.TODO(), "解析配置文件失败，使用默认配置: %v", err)
 		return &cfg, nil
 	}
 	if fullCfg.Search.Hybrid.Alpha != 0 {

@@ -398,7 +398,7 @@ func (s *Knowledge) processTaskItemContent(ctx context.Context, content string, 
 	labelThreshold := helper.GetLabelThreshold(ctx)
 	labelCountBeforeFilter := len(labels)
 	labels = helper.FilterLabels(labels, labelThreshold)
-	g.Log().Debug(ctx, fmt.Sprintf("标签过滤阈值: %d, 过滤前标签数: %d, 过滤后标签数: %d",
+	g.Log().Debug(ctx, fmt.Sprintf("标签过滤阈值: %f, 过滤前标签数: %d, 过滤后标签数: %d",
 		labelThreshold, labelCountBeforeFilter, len(labels)))
 
 	// 5. 存入向量数据库

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -43,7 +43,7 @@ func (c *OllamaEmbeddingClient) Embed(ctx context.Context, text string) ([]float
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("ollama embedding返回错误: %s", resp.Status)
 	}
-	respBytes, _ := ioutil.ReadAll(resp.Body)
+	respBytes, _ := io.ReadAll(resp.Body)
 	var result struct {
 		Embedding []float32 `json:"embedding"`
 	}

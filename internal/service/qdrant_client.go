@@ -76,7 +76,7 @@ func InitQdrantClient(ctx context.Context) error {
 		qdrantClient, err = qdrant.NewClient(config)
 		if err != nil {
 			g.Log().Errorf(ctx, "Qdrant客户端初始化失败: %v", err)
-			initErr = fmt.Errorf("Qdrant客户端初始化失败: %w", err)
+			initErr = fmt.Errorf("qdrant客户端初始化失败: %w", err)
 			return
 		}
 
